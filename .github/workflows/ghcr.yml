@@ -7,6 +7,9 @@ on:
     paths:
       - 'api/**'
       - 'controller/**'
+  # Republish on demand. The path filter above means a change outside api/ or
+  # controller/ never rebuilds, which leaves no way to recover a missed run.
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
