@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: avigaildanesh
 accent: anchor
 name: Unchecked Arithmetics
@@ -11,8 +11,53 @@ rule: |
     try:
       funcs = nodes.find_all_functions().exit_on_none()
       for func in funcs:
-        func.find_by_names("checked_add", "checked_sub", "checked_mul", "checked_div").exit_on_value()
-        for unchecked_comparison in func.find_binary_operations("*", "+", "-"):
-          print(unchecked_comparison.parent.to_result())
+        try:
+          # Rust's guarded forms, all of them. `saturating_*` is as deliberate
+          # as `checked_*` — it clamps rather than returning an Option — and
+          # some codebases mandate it in preference, which this rule then read
+          # as no overflow handling at all.
+          if func.find_by_names(
+              "checked_add", "checked_sub", "checked_mul", "checked_div",
+              "saturating_add", "saturating_sub", "saturating_mul", "saturating_div",
+              "wrapping_add", "wrapping_sub", "wrapping_mul",
+          ):
+            continue
+
+          # One expression holds one operator per pair of operands, so
+          # `a + b + c + d` reported the same line three times over.
+          # Report the operation, not its parent. The parent of a top-level
+          # operation is the enclosing function, so findings pointed at `fn`
+          # signatures rather than at any arithmetic — and every operation in
+          # one expression resolved to that same spot, reporting `a + b + c`
+          # once per operator.
+          seen = set()
+          for unchecked_comparison in func.find_binary_operations("*", "+", "-"):
+            if unchecked_comparison.access_path in seen:
+              continue
+            seen.add(unchecked_comparison.access_path)
+
+            # An expression built only from literals and constants is
+            # evaluated at compile time, where an overflow is a compile error
+            # rather than a wrap — `8 + Self::INIT_SPACE` and
+            # `Vec::with_capacity(32 + 4 + 2 + 8 + 32)` cannot overflow at
+            # runtime and are not what this rule is for. Constants are
+            # recognised by Rust's SCREAMING_CASE convention; `Self` is a type
+            # path rather than a value and does not make an operand runtime.
+            runtime_operand = False
+            for child in unchecked_comparison.find_by_access_path(""):
+              if child.ident is None:
+                continue
+              if child.ident == "Self":
+                continue
+              if child.ident.upper() == child.ident:
+                continue
+              runtime_operand = True
+              break
+            if not runtime_operand:
+              continue
+
+            print(unchecked_comparison.to_result())
+        except:
+          continue
     except:
       continue
