@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: forefy
 accent: anchor
 name: Unchecked Token Account Owner
@@ -70,15 +70,24 @@ rule: |
                   if field_node is None:
                       continue
                   field_node.find_by_names("TokenAccount").exit_on_none()
-                  try:
-                      field_node.find_chained_calls("token", "authority").exit_on_none()
-                  except:
-                      if field_node is None:
-                          continue
-                      if field_node.access_path in flagged_fields:
-                          continue
-                      flagged_fields.add(field_node.access_path)
-                      print(field_node.find_by_names("Account").first().to_result())
+
+                  # `token::authority` is one way to pin the source, not the
+                  # only one. An associated-token derivation fixes the address
+                  # outright from mint and authority, and `address = ...` names
+                  # it exactly — both strictly stronger than declaring an
+                  # authority. Same reasoning as the associated-token case in
+                  # duplicate_mutable_accounts.
+                  if field_node.find_chained_calls("token", "authority"):
+                      continue
+                  if field_node.find_chained_calls("associated_token", "authority"):
+                      continue
+                  if field_node.find_by_names("address"):
+                      continue
+
+                  if field_node.access_path in flagged_fields:
+                      continue
+                  flagged_fields.add(field_node.access_path)
+                  print(field_node.find_by_names("Account").first().to_result())
               except:
                   continue
       except:
