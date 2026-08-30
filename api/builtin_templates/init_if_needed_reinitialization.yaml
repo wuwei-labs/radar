@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Init If Needed Reinitialization
@@ -19,6 +19,27 @@ rule: |
               struct_path = init_node.access_path.split(".fields")[0]
               if not struct_path.endswith(".struct"):
                   continue
+
+              # A token account is only safe here when its address is pinned
+              # too. `associated_token::mint` + `::authority` derives it, and
+              # `address = ...` names it, so the create is a no-op on an
+              # account the caller cannot choose. Without either, the caller
+              # picks the mint and the authority, and it still matters.
+              #
+              # The trailing "." is load-bearing: `fields.named[1]` is a string
+              # prefix of `fields.named[10]`, so matching without a delimiter
+              # lets one field's constraints answer for another's.
+              field_path = init_node.access_path.split(".attrs")[0] + "."
+
+              def field_has(*idents):
+                  for candidate in nodes.find_by_names(*idents):
+                      if candidate.access_path.startswith(field_path):
+                          return True
+                  return False
+
+              if field_has("TokenAccount", "Mint"):
+                  if field_has("associated_token") or field_has("address"):
+                      continue
 
               struct_name = None
               for candidate in nodes.find_by_access_path(struct_path + ".ident"):
