@@ -28,6 +28,18 @@ rule: |
               if func.find_chained_calls("Account", "try_from").node_lists:
                   continue
 
+              # `try_deserialize` reads the 8-byte discriminator and rejects a
+              # mismatch — it is the check this rule is looking for, and the
+              # normal way to write it in Anchor. `try_deserialize_unchecked`
+              # is a distinct identifier and is deliberately not accepted here,
+              # because it skips exactly that comparison.
+              #
+              # A hand-rolled `data[..8] == T::DISCRIMINATOR` counts too; code
+              # that borrows raw bytes to inspect a version before deciding how
+              # to parse them cannot go through `try_deserialize` at all.
+              if func.find_by_names("try_deserialize", "DISCRIMINATOR"):
+                  continue
+
               print(reads_raw.first().to_result())
       except:
           continue
