@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Missing Token Mint Constraint
@@ -51,8 +51,15 @@ rule: |
                   if manually_validated:
                       continue
 
-                  field_node.find_macro_attribute_by_names("token").exit_on_none()
-                  field_node.find_macro_attribute_by_names("mint").exit_on_none()
+                  # Three ways to fix the mint, not one. `token::mint` states
+                  # it; `associated_token::mint` states it and derives the
+                  # address from it; `address = ...` names the account
+                  # outright, which fixes its mint along with everything else.
+                  # `mint` matches both attribute groups, so the first two are
+                  # one check. Demanding the literal `token` group reported
+                  # every associated-token field that had already pinned its
+                  # mint.
+                  field_node.find_macro_attribute_by_names("mint", "address").exit_on_none()
               except:
                   if struct_node.access_path in flagged_structs:
                       continue
