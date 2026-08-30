@@ -1,6 +1,6 @@
 services:
   controller:
-    image: ghcr.io/auditware/radar-controller:main
+    image: ghcr.io/wuwei-labs/radar-controller:main
     environment:
       DJANGO_HOST: ${DJANGO_HOST}
       DJANGO_HOST_LOCAL: ${DJANGO_HOST_LOCAL}
@@ -13,7 +13,7 @@ services:
 
   api:
     container_name: radar-api
-    image: ghcr.io/auditware/radar-api:main
+    image: ghcr.io/wuwei-labs/radar-api:main
     environment:
       DEBUG: ${DEBUG}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -47,7 +47,7 @@ services:
       retries: 20
 
   celeryworker:
-    image: ghcr.io/auditware/radar-api:main
+    image: ghcr.io/wuwei-labs/radar-api:main
     command: poetry run celery -A api worker -l info
     stdin_open: true
     tty: true
