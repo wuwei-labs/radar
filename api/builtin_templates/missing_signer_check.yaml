@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Missing Signer Check
@@ -21,6 +21,12 @@ rule: |
           for node in nodes.find_member_accesses("is_signer"):
               is_signer_nodes.append(node)
 
+          # `#[account(signer)]` proves the same thing as a `Signer<'info>`
+          # field, and is what you write when the account also needs a type —
+          # `Box<Account<'info, Thread>>` with `signer` cannot be spelled as
+          # `Signer<'info>` without losing the deserialization.
+          signer_constraints = nodes.find_macro_attribute_by_names("signer")
+
           reported = []
           for group in groups:
               for derive_node in group:
@@ -38,6 +44,11 @@ rule: |
                       if signer.access_path.startswith(struct_path + "."):
                           signed = True
                           break
+                  if not signed:
+                      for constraint in signer_constraints:
+                          if constraint.access_path.startswith(struct_path + "."):
+                              signed = True
+                              break
                   if signed:
                       continue
 
