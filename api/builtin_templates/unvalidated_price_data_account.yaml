@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: forefy
 accent: anchor
 name: Unvalidated Price Data Account
@@ -9,11 +9,49 @@ rule: |
   for source, nodes in ast:
       try:
           funcs = nodes.find_all_functions().exit_on_none()
+          contexts = nodes.find_by_names("Context")
+
           for func in funcs:
               try:
                   borrow_nodes = func.find_by_names("try_borrow_data", "borrow_data").exit_on_none()
                   func.find_by_names("require_keys_eq", "require_eq").exit_on_value()
                   func.find_comparison_involving("owner").exit_on_value()
+
+                  # `find_comparison_involving` sees binary operators, so it
+                  # misses `info.owner.eq(&crate::ID)` — the same check written
+                  # method-style, which is house style in some codebases and
+                  # exactly as strong.
+                  if func.find_chained_calls("owner", "eq"):
+                      continue
+
+                  # An Anchor constraint pins the account before the handler
+                  # runs, and it is written on the struct rather than in the
+                  # body, so nothing above can see it. `owner = ...` states the
+                  # owner outright; `seeds`/`bump` forces the address to a PDA
+                  # of this program, which the caller cannot substitute.
+                  struct_name = None
+                  for context in contexts:
+                      if not context.access_path.startswith(func.access_path):
+                          continue
+                      if ".inputs[" not in context.access_path:
+                          continue
+                      for arg in context.find_by_access_path(".arguments.angle_bracketed.args[0]"):
+                          struct_name = arg.ident
+                          break
+                      if struct_name is not None:
+                          break
+
+                  if struct_name is not None:
+                      pinned = False
+                      for candidate in nodes.find_by_names(struct_name):
+                          if not candidate.access_path.endswith(".struct"):
+                              continue
+                          if candidate.find_by_names("owner", "seeds"):
+                              pinned = True
+                          break
+                      if pinned:
+                          continue
+
                   print(borrow_nodes.first().to_result())
               except:
                   continue
