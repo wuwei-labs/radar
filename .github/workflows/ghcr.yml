@@ -11,6 +11,14 @@ on:
   # controller/ never rebuilds, which leaves no way to recover a missed run.
   workflow_dispatch:
 
+# The token is read-only by default in this org, so pushing to ghcr needs the
+# package scope requested explicitly. Without it the push fails late, after a
+# full multi-arch build, with "installation not allowed to Create organization
+# package" — which reads like an org policy rather than a missing declaration.
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: wuwei-labs/radar
