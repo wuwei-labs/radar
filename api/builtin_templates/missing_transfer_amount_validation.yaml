@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: avigaildanesh
 accent: anchor
 name: Missing Transfer Amount Validation
@@ -14,19 +14,86 @@ rule: |
           for func in funcs:
               try:
                   transfer_calls = func.find_chained_calls("token", "transfer").exit_on_none()
-                  # Skip when a require! statement validates the transferred amount before the CPI
-                  validated = False
-                  for require_node in func.find_by_names(*require_macros):
-                      require_stmt = require_node.access_path.split(".macro")[0]
-                      for amount_node in func.find_by_names("amount"):
-                          if amount_node.access_path.startswith(require_stmt):
-                              validated = True
+                  for group in transfer_calls:
+                      base = group.first().access_path.split(".func")[0]
+
+                      # The amount is the transfer's second argument. The rule
+                      # used to look for an ident literally named `amount`,
+                      # which meant a transfer of `claimable` or `balance` read
+                      # as unvalidated no matter how carefully it was guarded.
+                      amount_idents = set()
+                      for child in func.find_by_access_path(""):
+                          if child.ident is None:
+                              continue
+                          if child.access_path.startswith(base + ".args[1]"):
+                              amount_idents.add(child.ident)
+                      if not amount_idents:
+                          continue
+
+                      # A private helper that takes the amount as a parameter
+                      # cannot validate what it does not own — its caller
+                      # decides what to pass, and that caller is checked on its
+                      # own. This does NOT extend to instruction handlers: their
+                      # parameters come straight off the wire, which is the case
+                      # this rule exists for. Handlers are the ones taking a
+                      # `Context`, so require its absence before skipping.
+                      validated = False
+                      is_handler = False
+                      for child in func.find_by_access_path(""):
+                          if child.ident == "Context" and ".inputs[" in child.access_path:
+                              is_handler = True
                               break
+                      if not is_handler:
+                          for child in func.find_by_access_path(""):
+                              if child.ident in amount_idents and ".inputs[" in child.access_path:
+                                  validated = True
+                                  break
+
+                      if not validated:
+                        for require_node in func.find_by_names(*require_macros):
+                            require_stmt = require_node.access_path.split(".macro")[0]
+                            for child in func.find_by_access_path(""):
+                                if child.ident in amount_idents and child.access_path.startswith(require_stmt):
+                                    validated = True
+                                    break
+                            if validated:
+                                break
+
+                      # `if amount.gt(&0) { transfer }` guards the CPI just as
+                      # well as a `require!` before it — the transfer does not
+                      # happen otherwise. Method-style comparisons are house
+                      # style in some codebases and are not binary operations,
+                      # so both spellings have to be looked for.
+                      if not validated:
+                          for ident in amount_idents:
+                              # `find_chained_calls` wants a receiver chain, so
+                              # it matches `state.balance.gt(..)` but not a bare
+                              # local `balance.gt(..)`; `find_method_calls`
+                              # covers the second. Both spellings appear.
+                              if func.find_method_calls(ident, "gt") or func.find_method_calls(ident, "ge"):
+                                  validated = True
+                                  break
+                              if func.find_chained_calls(ident, "gt") or func.find_chained_calls(ident, "ge"):
+                                  validated = True
+                                  break
+                              if func.find_comparison_involving(ident):
+                                  validated = True
+                                  break
+
+                      # `if amount.gt(&0) { transfer }` — the CPI is inside the
+                      # branch, so the transfer simply does not happen when the
+                      # amount fails the test. None of the call-shape helpers
+                      # above reach into an `if` condition, so look for the
+                      # amount appearing in one.
+                      if not validated:
+                          for child in func.find_by_access_path(""):
+                              if child.ident in amount_idents and ".cond" in child.access_path:
+                                  validated = True
+                                  break
+
                       if validated:
-                          break
-                  if validated:
-                      continue
-                  print(transfer_calls.first()[1].to_result())
+                          continue
+                      print(group[1].to_result())
               except:
                   continue
       except:
