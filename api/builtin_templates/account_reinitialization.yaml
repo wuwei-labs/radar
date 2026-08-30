@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: forefy
 accent: anchor
 name: Account Reinitialization
@@ -10,15 +10,23 @@ rule: |
   for source, nodes in ast:
       try:
           init_funcs = nodes.find_functions_by_names("initialize", "init").exit_on_none()
-          require_with_initialized = init_funcs.find_by_names("require", "initialized")
-          if len(require_with_initialized) >= 2:
-              continue
+
           for func in init_funcs:
+              # A trait signature has no statements, so it can neither carry a
+              # guard nor reset anything. Reporting it meant every state trait
+              # was flagged twice, once for the declaration and once for the
+              # implementation beside it.
+              if not func.find_by_names("Ok"):
+                  continue
+
+              # Scoped to this function. The check used to run against the
+              # whole file, so a single guarded init silenced every other init
+              # declared next to it — and it keyed on the literal name
+              # `initialized`, missing guards written against a version or
+              # discriminator field.
+              if func.find_by_names("require", "require_eq", "require_keys_eq"):
+                  continue
+
               print(func.to_result())
       except:
           continue
-
-
-
-
-          
