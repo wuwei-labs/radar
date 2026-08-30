@@ -1,4 +1,4 @@
-version: 0.1.2
+version: 0.1.3
 author: forefy
 accent: anchor
 name: Init If Needed Reinitialization
@@ -6,6 +6,46 @@ description: Anchor accounts declared with init_if_needed can be reinitialized o
 severity: High
 certainty: Medium
 rule: |
+  # Pass 1 --- collect every state type whose own `init` refuses to run on a
+  # live account. `init_if_needed` hands the handler an account that may
+  # already exist, so the question is not "can this be called twice" but
+  # "does anything stop the second call from overwriting". A guard inside
+  # the type's `init` stops it, and that guard is almost never in the file
+  # under inspection: the state lives in `state/`, the constraint in
+  # `instructions/`. `ast` spans every source in the scan and re-iterates,
+  # so collect across all of them first and decide second.
+  guarded_types = set()
+  for source, nodes in ast:
+      try:
+          for func in nodes.find_functions_by_names("init", "initialize"):
+              # A trait signature has no body, so it can carry no guard.
+              if not func.find_by_names("Ok"):
+                  continue
+              if not func.find_by_names("require", "require_eq", "require_keys_eq"):
+                  continue
+              if ".impl." not in func.access_path:
+                  continue
+              # `impl ... for Account<'info, ContractState>` puts two idents
+              # under self_ty, and the wrapper is the wrong one: adding
+              # "Account" to this set matches every `init_if_needed` field
+              # there is and silently disables the rule. Prefer the generic
+              # argument, and fall back to the bare ident for an unwrapped
+              # `impl ContractState`.
+              self_ty_path = func.access_path.split(".impl.")[0] + ".impl.self_ty"
+              wrapped = []
+              bare = []
+              for candidate in nodes.find_by_access_path(".impl.self_ty"):
+                  if not candidate.access_path.startswith(self_ty_path):
+                      continue
+                  if ".arguments.angle_bracketed.args[" in candidate.access_path:
+                      wrapped.append(candidate.ident)
+                  else:
+                      bare.append(candidate.ident)
+              for ident in (wrapped if wrapped else bare):
+                  guarded_types.add(ident)
+      except:
+          continue
+
   for source, nodes in ast:
       try:
           init_nodes = nodes.find_macro_attribute_by_names("init_if_needed").exit_on_none()
@@ -40,6 +80,11 @@ rule: |
               if field_has("TokenAccount", "Mint"):
                   if field_has("associated_token") or field_has("address"):
                       continue
+
+              # Pass 2 --- the field's own type guards itself. Reported here
+              # this would be a finding whose fix already exists one file over.
+              if guarded_types and field_has(*guarded_types):
+                  continue
 
               struct_name = None
               for candidate in nodes.find_by_access_path(struct_path + ".ident"):
