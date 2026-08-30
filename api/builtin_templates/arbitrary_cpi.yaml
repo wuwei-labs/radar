@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: forefy
 accent: anchor
 name: Arbitrary Cross-Program Invocation
@@ -18,6 +18,13 @@ rule: |
           if len(spl_token_checks) >= 2 or len(spl_token_2022_checks) >= 2:
               continue
           for invoke_ref in invoke_refs:
-              print(invoke_ref.parent.to_result())
+              # A target is arbitrary only when the caller supplies it. An
+              # instruction built by `system_instruction::*` names its program
+              # by construction — the System Program ID is baked into the
+              # instruction, and there is nothing for a caller to substitute.
+              call_node = invoke_ref.parent
+              if call_node.find_by_names("system_instruction"):
+                  continue
+              print(call_node.to_result())
       except:
           continue
