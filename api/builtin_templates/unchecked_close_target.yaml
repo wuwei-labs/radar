@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Unchecked Close Target
@@ -82,6 +82,41 @@ rule: |
                       break
               if guarded:
                   continue
+
+              # `find_comparison_involving` reads parsed expressions, and an
+              # Anchor constraint is an attribute token stream, so the two
+              # remaining ways to prove a close target never register as a
+              # comparison at all.
+              if struct_path.endswith(".struct"):
+                  # `address = state.authority` on the target field itself.
+                  target_field_path = None
+                  for candidate in nodes.find_by_names(close_target_node.ident):
+                      if candidate.access_path.startswith(struct_path + ".fields.named["):
+                          target_field_path = candidate.access_path.split(".ty")[0] + "."
+                          break
+                  pinned = False
+                  if target_field_path is not None:
+                      for candidate in nodes.find_macro_attribute_by_names("address"):
+                          if candidate.access_path.startswith(target_field_path):
+                              pinned = True
+                              break
+                  if pinned:
+                      continue
+
+                  # `constraint = state.authority == target.key()` — has_one
+                  # written the long way, which is what you need when the field
+                  # and the state field are named differently. It sits in the
+                  # same `#[account(...)]` as the `close`, so the target ident
+                  # appears twice in that one token stream: once naming the
+                  # close target, once inside the constraint proving it. One
+                  # occurrence is an unproven close; more than one means
+                  # something else in the attribute refers to it.
+                  mentions = 0
+                  for sibling_node in close_node.parent.children:
+                      if sibling_node.ident == close_target_node.ident:
+                          mentions += 1
+                  if mentions > 1:
+                      continue
 
               print(close_target_node.to_result())
       except:
