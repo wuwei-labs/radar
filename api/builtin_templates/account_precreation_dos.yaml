@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: avigaildanesh
 accent: anchor
 name: Account Precreation DoS
@@ -9,17 +9,35 @@ vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks
 rule: |
   for source, nodes in ast:
       for function in nodes.find_all_functions():
-          if "init" not in function.ident.lower():
-              continue
-          
-          owner_refs = function.find_by_names("owner")
-          if not owner_refs:
-              continue
-          
-          require_checks = function.find_by_names("require")
-          default_checks = function.find_by_names("default", "Default")
-          
-          has_validation = (require_checks and default_checks)
-          
-          if not has_validation:
+          try:
+              # Match `init` / `initialize` as a word, not a substring. As a
+              # substring it also catches `validate_admin_or_initializer`,
+              # `uninitialized` and anything else those four letters appear
+              # inside, none of which initialize an account.
+              name_parts = function.ident.lower().split("_")
+              if not ("init" in name_parts or "initialize" in name_parts):
+                  continue
+
+              # A trait signature has no body, so it assigns no owner and can
+              # carry no guard. Its `owner: Pubkey` parameter alone was enough
+              # to report it, once for the declaration and again for the impl.
+              if not function.find_by_names("Ok"):
+                  continue
+
+              owner_refs = function.find_by_names("owner")
+              if not owner_refs:
+                  continue
+
+              # The guard is what matters, not which field it reads.
+              # `owner == Pubkey::default()` is one spelling of "this account
+              # is not live yet"; a version or discriminator field carrying 0
+              # says the same thing, and a state type that is reset and reused
+              # rather than closed cannot use the owner sentinel at all.
+              # Requiring the `default` comparison too reported every guard
+              # that picked a different field.
+              if function.find_by_names("require", "require_eq", "require_keys_eq"):
+                  continue
+
               print(function.to_result())
+          except:
+              continue
