@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: auditware/radar
+  IMAGE_NAME: wuwei-labs/radar
 
 jobs:
   build:

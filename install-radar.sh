@@ -5,7 +5,7 @@ echo "Installing radar.."
 
 BASE_DIR="${XDG_CONFIG_HOME:-$HOME}"
 RADAR_DIR="${RADAR_DIR-"$BASE_DIR/.radar"}"
-REPO_URL="https://github.com/auditware/radar.git"
+REPO_URL="https://github.com/wuwei-labs/radar.git"
 SCRIPT_PATH="$RADAR_DIR/radar"
 LINK_PATH="/usr/local/bin/radar"
 

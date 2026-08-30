@@ -54,9 +54,9 @@ check_docker
 
 cd "$RADAR_BASE_DIR"
 
-check_image_update "controller" "ghcr.io/auditware/radar-controller:main"
-check_image_update "api" "ghcr.io/auditware/radar-api:main"
+check_image_update "controller" "ghcr.io/wuwei-labs/radar-controller:main"
+check_image_update "api" "ghcr.io/wuwei-labs/radar-api:main"
 
 cd "$INITIAL_DIR"
 
-exec curl -L https://raw.githubusercontent.com/auditware/radar/main/install-radar.sh | bash
+exec curl -L https://raw.githubusercontent.com/wuwei-labs/radar/main/install-radar.sh | bash

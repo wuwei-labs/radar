@@ -69,7 +69,7 @@ handle_update_command() {
     echo "[i] Updating radar..."
     
     # Run the install script to update the radar repository
-    curl -sL https://raw.githubusercontent.com/auditware/radar/main/install-radar.sh | bash
+    curl -sL https://raw.githubusercontent.com/wuwei-labs/radar/main/install-radar.sh | bash
     
     if [ $? -ne 0 ]; then
         echo "[w] Install script encountered an issue, but continuing with Docker image updates..."
@@ -87,8 +87,8 @@ handle_update_command() {
     fi
     
     echo "[i] Updating Docker images..."
-    docker pull $arm_specific_flag ghcr.io/auditware/radar-controller:main > /dev/null 2>&1
-    docker pull $arm_specific_flag ghcr.io/auditware/radar-api:main > /dev/null 2>&1
+    docker pull $arm_specific_flag ghcr.io/wuwei-labs/radar-controller:main > /dev/null 2>&1
+    docker pull $arm_specific_flag ghcr.io/wuwei-labs/radar-api:main > /dev/null 2>&1
     
     echo "[i] Restarting containers with updated images..."
     docker compose -f "$compose_file" down > /dev/null 2>&1
@@ -350,10 +350,10 @@ if [ "$check_update" = true ] && [ "$development_mode" = false ]; then
     cd "$RADAR_BASE_DIR"
     
     updated=false
-    if check_image_update "ghcr.io/auditware/radar-controller" "ghcr.io/auditware/radar-controller:main"; then
+    if check_image_update "ghcr.io/wuwei-labs/radar-controller" "ghcr.io/wuwei-labs/radar-controller:main"; then
         updated=true
     fi
-    if check_image_update "ghcr.io/auditware/radar-api" "ghcr.io/auditware/radar-api:main"; then
+    if check_image_update "ghcr.io/wuwei-labs/radar-api" "ghcr.io/wuwei-labs/radar-api:main"; then
         updated=true
     fi
     
