@@ -1,4 +1,4 @@
-version: 0.2.0
+version: 0.2.1
 author: forefy
 accent: anchor
 name: Missing Owner Check
@@ -31,6 +31,47 @@ rule: |
           # of a deserialized account's own `.owner` field against the authority
           # is a different check and does not prove program ownership.
           if nodes.find_comparisons_between("owner", "ID") or nodes.find_comparisons_between("owner", "program_id"):
+              continue
+
+          # The same check written as a method call. `owner.eq(&crate::ID)` is
+          # what `require!` takes, and codebases that ban comparison operators
+          # write nothing else — reading only `==` reported every one of them.
+          # Still requires the argument to name a program ID: `owner.eq(&payer)`
+          # compares an authority, which proves nothing about who owns the
+          # account.
+          # Read the expression the `owner` sits in and ask what it is compared
+          # against. Scoped to that expression - the enclosing call or `require!`
+          # - rather than to a node shape, because the same source reaches this
+          # rule as a `method_call` when written as an `if` and as a macro token
+          # stream when written inside `require!`.
+          owner_checked = False
+          for hit in nodes.find_by_names("owner"):
+              if owner_checked:
+                  break
+
+              scope = None
+              if ".method_call" in hit.access_path:
+                  scope = hit.access_path.split(".method_call")[0] + ".method_call"
+              elif ".macro" in hit.access_path:
+                  scope = hit.access_path.split(".macro")[0] + ".macro"
+              if scope is None:
+                  continue
+
+              compares = False
+              names_a_program = False
+              for node in nodes.find_by_access_path(scope):
+                  if node.ident in ("eq", "ne"):
+                      compares = True
+                  if node.ident in ("ID", "program_id"):
+                      names_a_program = True
+
+              # `owner.eq(&crate::ID)` passes. The authority check written one
+              # line away in the same file - `contract.owner.eq(accounts.payer
+              # .key())` - names no program and stays reported.
+              if compares and names_a_program:
+                  owner_checked = True
+
+          if owner_checked:
               continue
 
           print(derive_account_nodes.first().first().to_result())

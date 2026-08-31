@@ -73,6 +73,14 @@ services:
     restart: on-failure
     volumes:
       - radar_data:/radar_data
+      # The worker is what actually executes a template, so it needs the same
+      # live source the api container gets. Without these it runs the copy
+      # baked into the image and an edited rule is silently scanned with its
+      # old logic — `--dev` rebuilds only when a `.py` file changes, and a
+      # template is a `.yaml`.
+      - ./api/api:/api/api:cached
+      - ./api/builtin_templates:/api/builtin_templates:cached
+      - ./api/scripts:/api/scripts:cached
     depends_on:
       postgres:
         condition: service_healthy
