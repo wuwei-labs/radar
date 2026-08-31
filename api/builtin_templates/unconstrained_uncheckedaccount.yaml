@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Unconstrained UncheckedAccount
@@ -13,6 +13,32 @@ rule: |
           constraints = nodes.find_macro_attribute_by_names(
               "address", "owner", "constraint", "seeds"
           )
+
+          # An attribute list is a flat token stream in source order, with the
+          # punctuation dropped, so a token's neighbours are what say which
+          # constraint it belongs to and what it is being compared against.
+          # Group them by the field they are written on.
+          field_tokens = {}
+          for token in nodes.find_by_access_path(".meta.list.tokens"):
+              owner = token.access_path.split(".attrs")[0]
+              if owner not in field_tokens:
+                  field_tokens[owner] = []
+              field_tokens[owner].append(token.ident)
+
+          # The words Anchor reads as the start of a constraint. Scanning left
+          # to the nearest one says which constraint a token sits inside: a
+          # token in `constraint = a.b == c.key()` finds `constraint`, one in
+          # `payer = c` finds `payer`.
+          attribute_keys = (
+              "mut", "init", "init_if_needed", "close", "payer", "space",
+              "seeds", "bump", "address", "owner", "constraint", "has_one",
+              "realloc", "zero", "signer", "token", "associated_token",
+              "executable", "rent_exempt",
+          )
+
+          unchecked_fields = set()
+          for account in unchecked:
+              unchecked_fields.add(account.access_path.split(".ty")[0])
 
           for account in unchecked:
               try:
@@ -37,7 +63,75 @@ rule: |
                           guarded = True
                           break
 
-                  if not guarded:
+                  if guarded:
+                      continue
+
+                  # A field is also pinned when a *sibling* field names it:
+                  # `has_one = this_field` binds it to what the sibling stores,
+                  # and `this_field.key()` inside a sibling's `constraint` or
+                  # `seeds` ties the two together. Both are as binding as an
+                  # attribute on the field itself, and neither is visible when
+                  # only the field's own attributes are read.
+                  #
+                  # Deliberately narrow. `close = this_field` says where rent
+                  # goes, not which account this is; `payer = this_field`,
+                  # `token::authority` and `associated_token::authority` derive
+                  # *another* account from this one and leave this one free;
+                  # `address = this_field.key()` pins the sibling, not this
+                  # field. The left scan lands on those words and rejects.
+                  field_name = None
+                  for candidate in nodes.find_by_access_path(field_path):
+                      if candidate.access_path == field_path:
+                          field_name = candidate.ident
+                          break
+                  if field_name is None:
+                      print(account.to_result())
+                      continue
+
+                  struct_path = account.access_path.split(".fields.named[")[0]
+
+                  pinned_by_sibling = False
+                  for owner in field_tokens:
+                      if pinned_by_sibling:
+                          break
+                      if not owner.startswith(struct_path + ".fields.named["):
+                          continue
+                      if owner == field_path:
+                          continue
+
+                      # A constraint written on an unchecked field proves
+                      # nothing: whatever it compares against is as
+                      # substitutable as this account is.
+                      if owner in unchecked_fields:
+                          continue
+
+                      idents = field_tokens[owner]
+                      for position in range(len(idents)):
+                          if idents[position] != field_name:
+                              continue
+
+                          attribute = None
+                          back = position
+                          while back > 0:
+                              back = back - 1
+                              if idents[back] in attribute_keys:
+                                  attribute = idents[back]
+                                  break
+
+                          # `this_field . key` - three tokens, punctuation
+                          # dropped, so `key` is the next ident along.
+                          followed_by_key = False
+                          if position + 1 < len(idents):
+                              followed_by_key = idents[position + 1] == "key"
+
+                          if attribute == "has_one":
+                              pinned_by_sibling = True
+                              break
+                          if attribute in ("constraint", "seeds") and followed_by_key:
+                              pinned_by_sibling = True
+                              break
+
+                  if not pinned_by_sibling:
                       print(account.to_result())
               except:
                   continue
