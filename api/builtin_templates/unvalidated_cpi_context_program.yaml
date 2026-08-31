@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Unvalidated CPI Context Program
@@ -11,10 +11,49 @@ rule: |
           funcs = nodes.find_all_functions().exit_on_none()
           for func in funcs:
               try:
-                  cpi_ctx = func.find_by_names("CpiContext").exit_on_none()
-                  remaining = func.find_by_names("remaining_accounts").exit_on_none()
-                  func.find_by_names("require_keys_eq", "require_eq").exit_on_value()
-                  print(cpi_ctx.first().to_result())
+                  cpi_ctxs = func.find_by_names("CpiContext").exit_on_none()
+
+                  # The bug is the CPI target being read out of
+                  # `remaining_accounts`, where the caller chooses it. The rule
+                  # used to ask only whether `remaining_accounts` appeared
+                  # anywhere in the same function, so a CPI whose program comes
+                  # from a typed `Program<'info, T>` field - which Anchor pins
+                  # to that program's ID - was reported whenever the handler
+                  # happened to forward remaining accounts for something else.
+                  #
+                  # Collect the locals bound from `remaining_accounts`, so the
+                  # binding can be followed to the argument the context is
+                  # built with.
+                  dynamic_names = set()
+                  for hit in func.find_by_names("remaining_accounts"):
+                      if ".let.init" not in hit.access_path:
+                          continue
+                      binding_path = hit.access_path.split(".let.init")[0] + ".let.pat.ident"
+                      for binding in func.find_by_access_path(binding_path):
+                          dynamic_names.add(binding.ident)
+
+                  for cpi_ctx in cpi_ctxs:
+                      if ".func.path.segments" not in cpi_ctx.access_path:
+                          continue
+
+                      # The program is the context's first argument, whether it
+                      # is written `CpiContext::new` or `new_with_signer`.
+                      program_arg = cpi_ctx.access_path.split(".func.path.segments")[0] + ".args[0]"
+
+                      caller_supplied = False
+                      for node in func.find_by_access_path(program_arg):
+                          if node.ident == "remaining_accounts" or node.ident in dynamic_names:
+                              caller_supplied = True
+                              break
+                      if not caller_supplied:
+                          continue
+
+                      # A key comparison in the handler is the fix this rule
+                      # asks for.
+                      if func.find_by_names("require_keys_eq", "require_eq").nodes:
+                          continue
+
+                      print(cpi_ctx.to_result())
               except:
                   continue
       except:
