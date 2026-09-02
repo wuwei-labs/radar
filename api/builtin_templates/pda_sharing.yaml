@@ -29,12 +29,9 @@ rule: |
               for index in range(len(siblings)):
                   if siblings[index].access_path != seeds_attr.access_path:
                       continue
-                  # The seed array follows the `seeds` token, and its leading
-                  # element is whatever constant this program derives that PDA
-                  # with - a `&[u8]` const, a byte literal, whatever it named
-                  # it. Nothing here is keyed to a particular program or a
-                  # particular spelling; the set is only ever what the sources
-                  # under scan declared about themselves.
+                  # The seed array follows the `seeds` token; its leading
+                  # element is the constant the program derives that PDA with,
+                  # whether that is a `&[u8]` const or a byte literal.
                   #
                   # Bounded by hand: the sandbox allows only print/len/range/
                   # dict/list/tuple/set/type, so `min` is not available here.
