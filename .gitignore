@@ -4,6 +4,7 @@
 **/staticfiles
 **/.vscode
 **/target
+**/rust_syn*.so
 Makefile.local
 output.md
 *.sarif
