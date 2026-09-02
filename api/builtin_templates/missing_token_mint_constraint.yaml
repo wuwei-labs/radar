@@ -1,87 +1,68 @@
-version: 0.1.2
+version: 0.1.5
 author: forefy
 accent: anchor
 name: Missing Token Mint Constraint
 description: Anchor account structs that accept TokenAccount fields without token::mint constraints can allow wrong-mint token accounts to be passed into sensitive flows.
 severity: Medium
-certainty: Medium
+certainty: Low
 rule: |
   for source, nodes in ast:
       try:
           nodes.find_by_names("TokenAccount").exit_on_none()
-          # `mint` catches both `token::mint` and `associated_token::mint`.
-          # Matching the attribute group instead would accept a field carrying
-          # only `token::authority`, which pins who may sign and says nothing
-          # about the mint — exactly the case this rule is for. `address` names
-          # the account outright, which fixes its mint along with everything
-          # else.
-          constraints = nodes.find_macro_attribute_by_names("mint", "address")
-          checks = nodes.find_by_names("require_keys_eq", "require_eq")
-          comparisons = nodes.find_comparison_involving("mint")
-          contexts = nodes.find_by_names("Context")
-
+          flagged_structs = set()
           for token_account_node in nodes.find_by_names("TokenAccount"):
               try:
                   if ".struct.fields.named[" not in token_account_node.access_path:
                       continue
+                  account_node = token_account_node.parent
 
-                  # Walked by access path rather than by `.parent`: a field
-                  # written `Box<Account<'info, TokenAccount>>` sits one node
-                  # deeper than a bare `Account<'info, TokenAccount>`, so a
-                  # fixed number of parent hops lands on the wrong node and
-                  # every boxed token account gets reported.
+                  # The field and its struct are derived from the access path
+                  # rather than by counting `.parent` hops. A field written
+                  # `Box<Account<'info, TokenAccount>>` sits one node deeper
+                  # than a bare `Account<'info, TokenAccount>`, so a fixed
+                  # number of hops lands on the wrong node: `struct_node` ends
+                  # up on the field, its `derive(Accounts)` lookup finds
+                  # nothing, and since the except block below is this rule's
+                  # reporting path, every boxed token account was reported.
+                  # Bound before the lookups below, not inside them: the except
+                  # block reads struct_node, so it has to exist even if a lookup
+                  # raises on the way there.
+                  field_node = None
+                  struct_node = None
+
+                  field_path = token_account_node.access_path.split(".ty")[0]
                   struct_path = token_account_node.access_path.split(".fields.named[")[0]
                   if not struct_path.endswith(".struct"):
                       continue
-
-                  is_accounts_struct = False
-                  for group in nodes.find_chained_calls("derive", "Accounts"):
-                      for derive_node in group:
-                          if derive_node.access_path.startswith(struct_path + "."):
-                              is_accounts_struct = True
-                              break
-                      if is_accounts_struct:
+                  for candidate in nodes.find_by_access_path(field_path):
+                      if candidate.access_path == field_path:
+                          field_node = candidate
                           break
-                  if not is_accounts_struct:
+                  for candidate in nodes.find_by_access_path(struct_path):
+                      if candidate.access_path == struct_path:
+                          struct_node = candidate
+                          break
+                  # `continue`, not exit_on_none: raising here would report.
+                  if field_node is None or struct_node is None:
                       continue
 
-                  # Scoped to this field. The trailing "." matters:
-                  # `fields.named[1]` is a string prefix of `fields.named[10]`,
-                  # so without a delimiter one field's constraints answer for
-                  # another's.
-                  field_path = token_account_node.access_path.split(".ty")[0] + "."
-
-                  pinned = False
-                  for constraint in constraints:
-                      if constraint.access_path.startswith(field_path):
-                          pinned = True
-                          break
-                  if pinned:
-                      continue
+                  struct_node.find_chained_calls("derive", "Accounts").exit_on_none()
 
                   # A token::mint constraint is the Anchor way, but a handler
                   # that checks the mint itself (require_keys_eq, or a
                   # comparison against the mint) is equally safe. Scoped to the
                   # struct and the handlers that take it, so one instruction's
                   # check does not excuse another's missing constraint.
-                  struct_ident = None
-                  for candidate in nodes.find_by_access_path(struct_path):
-                      if candidate.access_path == struct_path:
-                          struct_ident = candidate.ident
+                  scopes = [struct_node.access_path]
+                  for context in nodes.find_by_names("Context"):
+                      if ".inputs[" not in context.access_path:
+                          continue
+                      for arg in context.find_by_access_path(".arguments.angle_bracketed.args[0]"):
+                          if arg.ident == struct_node.ident:
+                              scopes.append(context.access_path.split(".inputs[")[0])
                           break
-
-                  scopes = [struct_path]
-                  if struct_ident is not None:
-                      for context in contexts:
-                          if ".inputs[" not in context.access_path:
-                              continue
-                          for arg in context.find_by_access_path(".arguments.angle_bracketed.args[0]"):
-                              if arg.ident == struct_ident:
-                                  scopes.append(context.access_path.split(".inputs[")[0])
-                              break
-
                   manually_validated = False
-                  for check in checks:
+                  for check in nodes.find_by_names("require_keys_eq", "require_eq"):
                       for scope in scopes:
                           if check.access_path.startswith(scope + "."):
                               manually_validated = True
@@ -89,7 +70,7 @@ rule: |
                       if manually_validated:
                           break
                   if not manually_validated:
-                      for comparison in comparisons:
+                      for comparison in nodes.find_comparison_involving("mint"):
                           for scope in scopes:
                               if comparison.access_path.startswith(scope + "."):
                                   manually_validated = True
@@ -99,8 +80,63 @@ rule: |
                   if manually_validated:
                       continue
 
-                  print(token_account_node.to_result())
+                  # A wrong-mint account is only harmful if the program records
+                  # something based on it. Where the program keeps no state of
+                  # its own, substituting a mint changes at most what the caller
+                  # sees about their own tokens - SPL Token still enforces that
+                  # a transfer is authorised by the account's owner or delegate.
+                  # Require a program state account (`#[account] struct ...`,
+                  # which appears as a bare `.meta.path` attribute rather than a
+                  # field-level `#[account(...)]` list).
+                  # (`continue`, not exit_on_none: in this rule the except block
+                  # is the reporting path, so raising here would report.)
+                  has_program_state = False
+                  for attr in nodes.find_by_names("account"):
+                      if ".struct.attrs" in attr.access_path and ".meta.path." in attr.access_path:
+                          has_program_state = True
+                          break
+                  if not has_program_state:
+                      continue
+
+                  # A token account already pinned to one specific account
+                  # cannot be swapped for a wrong-mint one, so the mint
+                  # constraint adds nothing. Pinning takes three forms:
+                  #   * has_one/seeds/address on the field itself
+                  #   * an inline constraint on the field
+                  #   * a SIBLING account's `has_one = <this field>`, which
+                  #     Anchor lowers to `sibling.<field> == <field>.key()` and
+                  #     which pins it to an exact pubkey - strictly stronger
+                  #     than pinning its mint.
+                  pinned = False
+                  for pin in nodes.find_macro_attribute_by_names("seeds", "address", "constraint", "has_one"):
+                      if pin.access_path.startswith(field_node.access_path + "."):
+                          pinned = True
+                          break
+                  if not pinned:
+                      for has_one in nodes.find_macro_attribute_by_names("has_one"):
+                          if not has_one.access_path.startswith(struct_node.access_path + "."):
+                              continue
+                          siblings = has_one.parent.children
+                          for index in range(len(siblings)):
+                              if siblings[index].access_path == has_one.access_path:
+                                  if index + 1 < len(siblings) and siblings[index + 1].ident == field_node.ident:
+                                      pinned = True
+                                  break
+                          if pinned:
+                              break
+                  if pinned:
+                      continue
+
+                  field_node.find_macro_attribute_by_names("token").exit_on_none()
+                  field_node.find_macro_attribute_by_names("mint").exit_on_none()
               except:
-                  continue
+                  # The reporting path dereferences struct_node, so a lookup
+                  # that came back empty must not raise from inside the handler.
+                  if struct_node is None:
+                      continue
+                  if struct_node.access_path in flagged_structs:
+                      continue
+                  flagged_structs.add(struct_node.access_path)
+                  print(account_node.to_result())
       except:
           continue
