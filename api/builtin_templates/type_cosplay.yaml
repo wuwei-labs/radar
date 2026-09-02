@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.2.0
 author: forefy
 accent: anchor
 name: Type Cosplay
@@ -16,7 +16,37 @@ rule: |
               # deserialization (`try_from_slice`/`try_deserialize`), not a plain
               # data borrow - zeroing an account's data when closing it
               # (`try_borrow_mut_data`) is a different operation entirely.
+              #
+              # `try_deserialize_unchecked` belongs in this list and not only in
+              # the exemption below. It is the deserialization *without* the
+              # discriminator comparison, so a function reaching for it is the
+              # case this rule exists for — but being a distinct identifier it
+              # never matched `try_deserialize`, so such a function did not
+              # enter the rule at all. That is how Anchor's own
+              # `InterfaceAccount::reload` went unreported: it pinned owner
+              # stability and then re-deserialized unchecked, so an account
+              # could come back as a different type after a CPI.
               reads_raw = func.find_by_names("try_from_slice", "try_deserialize")
+
+              # `try_deserialize_unchecked` is the deserialization *without* the
+              # discriminator comparison, and being a distinct identifier it
+              # never matched above — so a function reaching for it did not
+              # enter this rule at all. That is how Anchor's own
+              # `InterfaceAccount::reload` went unreported: it pinned owner
+              # stability and then re-deserialized unchecked, so an account
+              # could come back as a different type after a CPI.
+              #
+              # Counted only when the result is written back into an account
+              # that already exists (`set_inner`) — a refresh. Returning a
+              # freshly constructed value from it is `try_from_unchecked`,
+              # Anchor's deliberate unchecked constructor, which is present in
+              # the patched source too; reporting that would fire on fixed and
+              # vulnerable code alike and so distinguish nothing.
+              if not reads_raw.nodes:
+                  unchecked = func.find_by_names("try_deserialize_unchecked")
+                  if unchecked.nodes and func.find_by_names("set_inner").nodes:
+                      reads_raw = unchecked
+
               if not reads_raw.nodes:
                   continue
 
