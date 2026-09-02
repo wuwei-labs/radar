@@ -414,6 +414,67 @@ class RustASTNode(ASTNode):
         recurse(self)
         return ASTNodeList(matching_nodes)
 
+    def _ancestor_at_access_path(self, target: str) -> Optional["RustASTNode"]:
+        """Climb to the ancestor whose access path is exactly `target`.
+
+        Args:
+            target: The full access path of the ancestor to return.
+
+        Returns:
+            The matching ancestor, or None if this node is not beneath it.
+        """
+        node = self
+        while node is not None:
+            if node.access_path == target:
+                return node
+            node = node.parent
+        return None
+
+    @dsl_log
+    def owning_field(self) -> Optional["RustASTNode"]:
+        """The named struct field this node's type belongs to.
+
+        A type is written at whatever depth its wrappers put it:
+
+            Account<'info, T>                 - the field is 2 nodes up
+            Box<Account<'info, T>>            - 3
+            Option<Account<'info, T>>         - 3
+            Option<Box<Account<'info, T>>>    - 4
+
+        so counting `.parent` hops finds the field for one spelling and some
+        node in the middle of the type for the others. Anchor accepts all of
+        them for the same account, and a rule that hop-counts silently reads
+        the wrong node for the rest - which, in a rule whose except block is
+        its reporting path, means reporting every wrapped account. Resolving
+        against the access path is depth-agnostic, so it holds for wrappers
+        this DSL has never heard of.
+
+        Returns:
+            The field node, or None if this node is not part of a named
+            struct field's type.
+        """
+        if ".fields.named[" not in self.access_path:
+            return None
+        return self._ancestor_at_access_path(self.access_path.split(".ty")[0])
+
+    @dsl_log
+    def owning_struct(self) -> Optional["RustASTNode"]:
+        """The struct whose field this node's type belongs to.
+
+        The companion to `owning_field`, resolved the same way and for the
+        same reason. See that method for why hop counting is not equivalent.
+
+        Returns:
+            The struct node, or None if this node is not part of a named
+            struct field's type.
+        """
+        if ".fields.named[" not in self.access_path:
+            return None
+        target = self.access_path.split(".fields.named[")[0]
+        if not target.endswith(".struct"):
+            return None
+        return self._ancestor_at_access_path(target)
+
     @dsl_log
     def find_macro_attribute_by_names(self, *idents: tuple[str, ...]) -> ASTNodeList:
         """Find macro attributes by their identifier names.

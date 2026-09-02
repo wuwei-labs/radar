@@ -1,4 +1,4 @@
-version: 0.1.2
+version: 0.1.3
 author: forefy
 accent: anchor
 name: Duplicate Mutable Accounts
@@ -45,17 +45,41 @@ rule: |
                       account_path = account.access_path
                       if not account_path.startswith(struct_path + ".fields.named["):
                           continue
-                      if account.parent is None:
+                      # The field is resolved by access path rather than by a
+                      # `.parent` hop: `Box<Account<'info, T>>` and
+                      # `Option<Box<...>>` nest deeper than a bare
+                      # `Account<'info, T>`, so the hop landed inside the type
+                      # and `field_name` was not the field's name - which
+                      # silently disabled the `.key()` guard below.
+                      field_node = account.owning_field()
+                      if field_node is None:
                           continue
-                      field_name = account.parent.ident
+                      field_name = field_node.ident
                       field_path = account_path.split(".ty")[0]
 
                       # The inner type T lives under the generic arguments; the
                       # lifetime arg carries no `.type`, so this picks out T.
+                      # Scoped to this `Account` node rather than to the field's
+                      # whole `.ty` subtree: the subtree yields the outermost
+                      # type argument first, so `Box<Account<'info, T>>` gave
+                      # `Account` - the Box's argument - for every boxed field.
+                      # They then all shared one pseudo-type, any two unrelated
+                      # boxed accounts in a struct looked like duplicates, and
+                      # the TokenAccount/Mint exemption below never matched.
+                      # Standing on the `Account` node makes the first match T
+                      # at any wrapper depth.
+                      # Matched strictly below this node, never on it: a boxed
+                      # `Account` is itself the Box's type argument, so its own
+                      # path already carries `arguments...type.path.segments`
+                      # and it would answer as its own inner type.
                       inner_type = None
-                      for candidate in nodes.find_by_access_path(field_path + ".ty"):
-                          if ".arguments.angle_bracketed.args[" in candidate.access_path \
-                             and ".type.path.segments" in candidate.access_path:
+                      prefix = account.access_path + "."
+                      for candidate in account.find_by_access_path(".arguments.angle_bracketed.args["):
+                          if not candidate.access_path.startswith(prefix):
+                              continue
+                          relative = candidate.access_path[len(prefix):]
+                          if "arguments.angle_bracketed.args[" in relative \
+                             and ".type.path.segments" in relative:
                               inner_type = candidate.ident
                               break
                       if inner_type is None:

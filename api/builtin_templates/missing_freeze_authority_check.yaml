@@ -1,4 +1,4 @@
-version: 0.1.0
+version: 0.1.1
 author: forefy
 accent: anchor
 name: Missing Freeze Authority Check
@@ -14,9 +14,18 @@ rule: |
               try:
                   if ".struct.fields.named[" not in mint_node.access_path:
                       continue
-                  account_node = mint_node.parent
-                  field_node = account_node.parent
-                  struct_node = field_node.parent
+                  # Resolved by access path, not by counting `.parent` hops:
+                  # `Box<Account<'info, Mint>>` and `Option<Box<...>>` nest
+                  # deeper than a bare `Account<'info, Mint>`, so a fixed hop
+                  # count put `struct_node` on the field, its `derive(Accounts)`
+                  # lookup found nothing, and the wrapped mint was skipped
+                  # entirely - a missed finding rather than a noisy one, and
+                  # `field_node` would have carried the wrong span had it
+                  # reported.
+                  field_node = mint_node.owning_field()
+                  struct_node = mint_node.owning_struct()
+                  if field_node is None or struct_node is None:
+                      continue
                   struct_node.find_chained_calls("derive", "Accounts").exit_on_none()
                   struct_node.find_by_names("TokenAccount").exit_on_none()
                   struct_node.find_by_names("freeze_authority").exit_on_value()

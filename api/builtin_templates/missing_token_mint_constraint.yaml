@@ -24,24 +24,16 @@ rule: |
                   # up on the field, its `derive(Accounts)` lookup finds
                   # nothing, and since the except block below is this rule's
                   # reporting path, every boxed token account was reported.
-                  # Bound before the lookups below, not inside them: the except
-                  # block reads struct_node, so it has to exist even if a lookup
-                  # raises on the way there.
-                  field_node = None
-                  struct_node = None
-
-                  field_path = token_account_node.access_path.split(".ty")[0]
-                  struct_path = token_account_node.access_path.split(".fields.named[")[0]
-                  if not struct_path.endswith(".struct"):
-                      continue
-                  for candidate in nodes.find_by_access_path(field_path):
-                      if candidate.access_path == field_path:
-                          field_node = candidate
-                          break
-                  for candidate in nodes.find_by_access_path(struct_path):
-                      if candidate.access_path == struct_path:
-                          struct_node = candidate
-                          break
+                  # Resolved by access path, not by counting `.parent` hops: a
+                  # field written `Box<Account<'info, TokenAccount>>` or
+                  # `Option<Box<...>>` nests deeper than a bare
+                  # `Account<'info, TokenAccount>`, so a fixed hop count lands
+                  # `struct_node` on the field, its `derive(Accounts)` lookup
+                  # finds nothing, and because the except block below is this
+                  # rule's reporting path, every wrapped token account was
+                  # reported.
+                  field_node = token_account_node.owning_field()
+                  struct_node = token_account_node.owning_struct()
                   # `continue`, not exit_on_none: raising here would report.
                   if field_node is None or struct_node is None:
                       continue
