@@ -1,6 +1,6 @@
 version: 0.1.3
 author: forefy
-accent: anchor
+accent: solana
 name: Unvalidated Price Data Account
 description: Reading oracle or price data from an untyped AccountInfo without validating the account owner can allow untrusted accounts to supply forged pricing data.
 severity: High

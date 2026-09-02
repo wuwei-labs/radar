@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: stylus
+accent: rust
 name: Off By One Comparison
 description: Gating the success path of a bound check on a strict comparison against an inclusive boundary (max, limit, cap, threshold) rejects the boundary value itself. `amount < max` accepts one unit less than intended where `amount <= max` is meant.
 severity: Low

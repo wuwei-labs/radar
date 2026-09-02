@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: solana
 name: Unvalidated Sysvar Account
 description: A sysvar passed as a raw AccountInfo or UncheckedAccount is not checked against the sysvar's well-known address, so a caller can substitute an account of their own and control what the instruction reads. Anchor's Sysvar type or an address constraint pins it.
 severity: Low

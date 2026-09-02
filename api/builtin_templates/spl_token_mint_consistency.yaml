@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: SPL Token Mint Consistency
 description: Token transfer flows that separately trust a Mint account and a TokenAccount without enforcing that the token account uses the same mint can allow asset substitution.
 severity: High

@@ -1,6 +1,6 @@
 version: 0.2.0
 author: forefy
-accent: anchor
+accent: solana
 name: Type Cosplay
 description: Type cosplay vulnerability occurs when a program fails to validate that an account is of the expected type, allowing malicious accounts to masquerade as legitimate program accounts.
 severity: Low
@@ -16,16 +16,6 @@ rule: |
               # deserialization (`try_from_slice`/`try_deserialize`), not a plain
               # data borrow - zeroing an account's data when closing it
               # (`try_borrow_mut_data`) is a different operation entirely.
-              #
-              # `try_deserialize_unchecked` belongs in this list and not only in
-              # the exemption below. It is the deserialization *without* the
-              # discriminator comparison, so a function reaching for it is the
-              # case this rule exists for — but being a distinct identifier it
-              # never matched `try_deserialize`, so such a function did not
-              # enter the rule at all. That is how Anchor's own
-              # `InterfaceAccount::reload` went unreported: it pinned owner
-              # stability and then re-deserialized unchecked, so an account
-              # could come back as a different type after a CPI.
               reads_raw = func.find_by_names("try_from_slice", "try_deserialize")
 
               # `try_deserialize_unchecked` is the deserialization *without* the

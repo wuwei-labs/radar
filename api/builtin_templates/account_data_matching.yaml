@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: solana
 name: Account Data Matching
 description: Unpacking account structures without verifying authorization might allow an attacker to view or modify account data unintentionally. Therefore, account unpack operations should be accompanied by appropriate ownership verification.
 severity: Low

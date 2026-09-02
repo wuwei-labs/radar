@@ -1,6 +1,6 @@
 version: 0.1.2
 author: forefy
-accent: anchor
+accent: solana
 name: Missing Freeze Authority Check
 description: Programs that accept token deposits without verifying the mint freeze_authority is None allow token issuers to freeze user accounts and trap deposited funds.
 severity: Medium

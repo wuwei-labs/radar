@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: rust
 name: Decimal To U64 Without Sign Check
 description: Converting subtraction results to u64 without a preceding non-negative guard can panic or DoS liquidation and accounting flows.
 severity: Medium

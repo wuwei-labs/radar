@@ -1,6 +1,6 @@
 version: 0.2.2
 author: avigaildanesh
-accent: anchor
+accent: solana
 name: Missing Transfer Amount Validation
 description: A program that signs a token transfer with its own PDA moves tokens it custodies. If the amount comes from the caller and is never checked against what that caller is entitled to, one caller can drain the vault. SPL Token only enforces that the balance is sufficient, not that the withdrawer is owed it.
 severity: Low

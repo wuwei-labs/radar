@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: solana
 name: Missing Bump Seed Canonicalization
 description: create_program_address accepts any bump that lands on a valid address, so a caller-supplied bump can derive a second, non-canonical PDA for the same seeds. find_program_address returns the canonical bump and is what a derivation should be checked against.
 severity: Medium

@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: stylus
+accent: rust
 name: Incorrect Ceiling Division
 description: Dividing a token or value amount with `/` truncates toward zero, so the remainder is silently given away. Financial divisions should round up - through div_ceil / checked_ceil_div, a `(a + b - 1) / b` numerator, or an explicit remainder correction - whenever rounding down favours the caller.
 severity: Medium

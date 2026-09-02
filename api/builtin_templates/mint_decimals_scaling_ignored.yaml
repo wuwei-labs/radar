@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Mint Decimals Scaling Ignored
 description: Scaling a token amount by a hardcoded power-of-ten factor assumes a fixed mint decimals value. When the mint's actual decimals differ, the amount is mispriced, so scaling should derive from mint.decimals instead of a literal.
 severity: Medium

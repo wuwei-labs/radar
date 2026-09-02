@@ -1,6 +1,6 @@
 version: 0.1.2
 author: forefy
-accent: anchor
+accent: solana
 name: Unvalidated CPI Context Program
 description: Building a CPI context from a program account sourced from dynamic accounts without validating the program ID can allow arbitrary cross-program invocation targets.
 severity: High

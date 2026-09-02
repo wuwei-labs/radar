@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: solana
 name: Unchecked Token Account Owner
 description: SPL token transfer CPIs that lack a token::authority constraint on the source token account allow callers to pass token accounts they do not own, enabling unauthorized fund transfers.
 severity: High

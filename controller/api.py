@@ -4,6 +4,7 @@ import time
 import requests
 from pathlib import Path
 from helpers import get_env_variable, localize_results
+from detection import detect_language_from_path
 
 
 # Use case is mostly container, leaving a basic resolver as groundwork for the future
@@ -63,82 +64,32 @@ def handle_response(response):
         sys.exit(2)
 
 
-def detect_language_from_path(path: Path) -> tuple[str, str]:
-    """Detect language and framework from file extension or folder contents.
-    
-    Returns: (language, framework) tuple
-    """
-    if path.is_file():
-        if path.suffix == ".sol":
-            return ("solidity", "standalone")
-        elif path.suffix == ".rs":
-            return ("rust", "unknown")
-    elif path.is_dir():
-        # Check for .sol files
-        try:
-            next(path.glob("**/*.sol"))
-            # Check if it's a Foundry project
-            if (path / "foundry.toml").exists():
-                return ("solidity", "foundry")
-            else:
-                return ("solidity", "standalone")
-        except StopIteration:
-            pass
-        
-        # Check for Rust project (Cargo.toml, recursive)
-        try:
-            cargo_files = list(path.glob("**/Cargo.toml"))
-            if not cargo_files:
-                raise StopIteration
-            
-            # Detect Rust framework - check Cargo.toml dependencies first
-            framework_detected = None
-            for cargo_file in cargo_files:
-                try:
-                    content = cargo_file.read_text()
-                    if "anchor-lang" in content or "anchor-spl" in content:
-                        framework_detected = "anchor"
-                        break
-                    elif "stylus-sdk" in content:
-                        framework_detected = "stylus"
-                        break
-                except:
-                    pass
-            
-            # If detected from dependencies, return that
-            if framework_detected:
-                return ("rust", framework_detected)
-            
-            # Otherwise check for config files
-            if (path / "Anchor.toml").exists():
-                return ("rust", "anchor")
-            elif (path / "Xargo.toml").exists():
-                return ("rust", "stylus")
-            else:
-                return ("rust", "unknown")
-        except StopIteration:
-            pass
-    return ("unknown", "unknown")
-
-
 def generate_ast_for_file_or_folder(path: Path, path_type: str):
     # Detect and show language before AST generation
-    language, framework = detect_language_from_path(path)
+    language, framework, protocols = detect_language_from_path(path)
     if language != "unknown":
         print(f"[i] Language detected: {language}")
         if framework != "unknown":
             framework_label = {
                 "anchor": "Anchor (Solana)",
+                "solana": "Solana (native)",
                 "stylus": "Stylus (Arbitrum)",
                 "foundry": "Foundry",
                 "standalone": "Standalone"
             }.get(framework, framework)
             print(f"[i] Framework/Toolchain: {framework_label}")
+        if protocols:
+            print(f"[i] Protocols detected: {', '.join(protocols)}")
     
     try:
         response = requests.post(
             f"{api_uri}/generate_ast/",
-            json={"source_type": path_type, f"{path_type}_path": str(path), "framework": framework},
+            json={
+                "source_type": path_type,
+                f"{path_type}_path": str(path),
+                "framework": framework,
+                "protocols": protocols,
+            },
         )
         result = handle_response(response)
         if result is not None:

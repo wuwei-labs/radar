@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Anchor Spot Price Oracle
 description: Anchor price or collateral helpers should not derive oracle values directly from manipulable AMM reserve balances without a TWAP-style reference.
 severity: High

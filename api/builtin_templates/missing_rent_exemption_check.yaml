@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Missing Rent Exemption Check
 description: Account creation via system_program without verifying rent exemption lamports can produce accounts that are garbage-collected by the Solana runtime, causing fund loss or program failures.
 severity: Medium

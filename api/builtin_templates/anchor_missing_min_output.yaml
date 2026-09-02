@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Anchor Missing Min Output
 description: Anchor swap-like instructions should not accept a minimum output argument that is declared but never enforced in the instruction body.
 severity: Medium

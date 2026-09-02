@@ -1,6 +1,6 @@
 version: 0.1.0
 author: avigaildanesh
-accent: anchor
+accent: solana
 name: Random Authority Generation
 description: Detects generation of random/unique Pubkey for authority which bypasses proper authority validation.
 severity: Low

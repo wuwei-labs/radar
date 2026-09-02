@@ -19,6 +19,12 @@ class GeneratedAST(models.Model):
     task_ids = ArrayField(models.CharField(max_length=255), blank=True, null=True)
     language = models.CharField(max_length=50, default="rust", blank=True, null=True)
     framework = models.CharField(max_length=50, default="unknown", blank=True, null=True)
+    # Protocols this source integrates with (squads, metaplex, antegen, ...),
+    # read from the same manifests the framework comes from. A template carrying
+    # a `protocol` runs only when that protocol is listed here.
+    protocols = ArrayField(
+        models.CharField(max_length=50), blank=True, null=True, default=list
+    )
 
     class SourceTypeOptions(models.TextChoices):
         FILE = "file"

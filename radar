@@ -156,52 +156,64 @@ handle_list_templates_command() {
     echo "==================="
     echo ""
     
-    # Rust - Anchor templates
-    anchor_templates=$(for template in "$templates_dir"/*.yaml; do
-        if grep -q "^accent: anchor" "$template" 2>/dev/null; then
-            grep "^name:" "$template" | sed 's/name: *//'
+    # Rust templates, grouped by accent. An accent names the narrowest thing a
+    # rule needs, and a scan runs its framework's accent plus everything more
+    # general: Anchor gets anchor+solana+rust, native Solana gets solana+rust,
+    # Stylus gets stylus+rust.
+    rust_count=0
+    for group in "rust:Rust - any target" "solana:Rust - Solana (native + Anchor)" "anchor:Rust - Anchor only" "stylus:Rust - Stylus (Arbitrum)"; do
+        accent="${group%%:*}"
+        label="${group#*:}"
+        group_templates=$(for template in "$templates_dir"/*.yaml; do
+            if grep -q "^accent: $accent\$" "$template" 2>/dev/null; then
+                grep "^name:" "$template" | sed 's/name: *//'
+            fi
+        done | sort)
+        if [ -n "$group_templates" ]; then
+            group_count=$(printf '%s\n' "$group_templates" | wc -l | tr -d ' ')
+            echo "$label [$group_count templates]"
+            echo "-----------------------------------"
+            echo "$group_templates" | sed 's/^/  • /'
+            echo ""
+            rust_count=$((rust_count + group_count))
         fi
-    done | sort)
-    
-    anchor_count=$(echo "$anchor_templates" | grep -c "^" 2>/dev/null || echo 0)
-    if [ "$anchor_count" -gt 0 ]; then
-        echo "Rust - Anchor (Solana) [$anchor_count templates]"
-        echo "-----------------------------------"
-        echo "$anchor_templates" | sed 's/^/  • /'
-        echo ""
+    done
+
+    # Protocol packs: rules that apply only to programs integrating with that
+    # protocol, run when the scanned source depends on it.
+    protocol_count=0
+    if [ -d "$templates_dir/protocol" ]; then
+        for protocol_dir in "$templates_dir"/protocol/*/; do
+            [ -d "$protocol_dir" ] || continue
+            protocol=$(basename "$protocol_dir")
+            protocol_templates=$(grep -h "^name:" "$protocol_dir"*.yaml 2>/dev/null | sed 's/name: *//' | sort)
+            [ -n "$protocol_templates" ] || continue
+            this_count=$(printf '%s\n' "$protocol_templates" | wc -l | tr -d ' ')
+            echo "Protocol - $protocol [$this_count templates]"
+            echo "-----------------------------------"
+            echo "$protocol_templates" | sed 's/^/  • /'
+            echo ""
+            protocol_count=$((protocol_count + this_count))
+        done
     fi
-    
-    # Rust - Stylus templates
-    stylus_templates=$(for template in "$templates_dir"/*.yaml; do
-        if grep -q "^accent: stylus" "$template" 2>/dev/null; then
-            grep "^name:" "$template" | sed 's/name: *//'
-        fi
-    done | sort)
-    
-    stylus_count=$(echo "$stylus_templates" | grep -c "^" 2>/dev/null || echo 0)
-    if [ "$stylus_count" -gt 0 ]; then
-        echo "Rust - Stylus (Arbitrum) [$stylus_count templates]"
-        echo "-----------------------------------"
-        echo "$stylus_templates" | sed 's/^/  • /'
-        echo ""
-    fi
-    
+
     # Solidity templates
     solidity_templates=$(for template in "$templates_dir"/*.yaml; do
         if grep -q "^language: solidity" "$template" 2>/dev/null; then
             grep "^name:" "$template" | sed 's/name: *//'
         fi
     done | sort)
-    
-    solidity_count=$(echo "$solidity_templates" | grep -c "^" 2>/dev/null || echo 0)
-    if [ "$solidity_count" -gt 0 ]; then
+
+    solidity_count=0
+    if [ -n "$solidity_templates" ]; then
+        solidity_count=$(printf '%s\n' "$solidity_templates" | wc -l | tr -d ' ')
         echo "Solidity [$solidity_count templates]"
         echo "-----------------------------------"
         echo "$solidity_templates" | sed 's/^/  • /'
         echo ""
     fi
-    
-    total=$((anchor_count + stylus_count + solidity_count))
+
+    total=$((rust_count + protocol_count + solidity_count))
     echo "Total: $total templates"
     echo ""
     

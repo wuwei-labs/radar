@@ -1,6 +1,6 @@
 version: 0.1.2
 author: forefy
-accent: anchor
+accent: solana
 name: Closing Accounts Insecurely
 description: Closing accounts in Solana requires transferring the lamports remaining in the account. When lamports are zeroed, the Solana runtime eventually closes the account. Improperly setting the account for closure could cause account reinitialization type attacks.
 severity: Medium

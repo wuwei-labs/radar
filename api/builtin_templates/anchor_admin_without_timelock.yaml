@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Anchor Admin Without Timelock
 description: Immediate Anchor admin setters that change critical protocol thresholds or fees should gate execution behind a timelock.
 severity: Medium

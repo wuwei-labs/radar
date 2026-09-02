@@ -1,6 +1,6 @@
 version: 0.2.0
 author: forefy
-accent: anchor
+accent: solana
 name: Account Reinitialization
 description: When account initialization is not properly validated against reinitialization attempts, callers of the program may try to reinitialize an existing account to manipulate its data and state.
 severity: High

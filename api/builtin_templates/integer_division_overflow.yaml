@@ -1,6 +1,6 @@
-version: 0.1.0
+version: 0.2.0
 author: forefy
-accent: stylus
+accent: rust
 name: Integer Division Overflow
 description: Division operations without checked_div can cause panics on division by zero or overflow conditions.
 severity: Low
@@ -17,7 +17,14 @@ rule: |
         
         func.find_by_names("checked_div").exit_on_value()
         
-        for div_op in func.find_binary_operations("/"):
+        # Float division is a different operation: dividing by zero yields inf
+        # rather than panicking, and `checked_div` does not exist for f32/f64, so
+        # the fix this rule asks for cannot be written. A function computing in
+        # floats - `(x as f32).ln() / (y as f32).ln()` - is not this bug. Types
+        # are not resolved at this layer, so the cast is the signal.
+        func.find_by_names("f32", "f64").exit_on_value()
+
+      for div_op in func.find_binary_operations("/"):
           print(div_op.parent.to_result())
     except:
       continue

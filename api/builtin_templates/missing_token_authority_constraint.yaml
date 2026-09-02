@@ -1,6 +1,6 @@
 version: 0.1.1
 author: forefy
-accent: anchor
+accent: solana
 name: Missing Token Authority Constraint
 description: TokenAccount fields in Anchor account structs without a token::authority constraint allow callers to pass token accounts they do not own, bypassing ownership verification.
 severity: High

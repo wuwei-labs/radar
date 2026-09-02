@@ -1,6 +1,6 @@
 version: 0.3.0
 author: forefy
-accent: anchor
+accent: solana
 name: PDA Sharing
 description: Reuse of a PDA across multiple authority domains can lead to unauthorized data or funds access.
 severity: Low

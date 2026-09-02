@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Anchor Reward Overflow
 description: Reward or interest calculations that multiply staked amounts by rates without checked_mul can silently overflow on Solana, distributing incorrect reward amounts or panicking.
 severity: High

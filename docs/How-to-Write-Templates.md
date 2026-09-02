@@ -10,12 +10,57 @@
   - [Indicating results / vulnerable code segments](#indicating-results--vulnerable-code-segments)
 - [Write your first rule](#write-your-first-rule)
 
+## Which sources a template runs against
+
+Two independent fields decide this, and they answer different questions.
+
+**`accent` - what the rule needs to exist at all.**
+
+| accent | Runs against | Use it when the rule keys on |
+|---|---|---|
+| `rust` | every Rust source, any chain | arithmetic, comparisons - nothing chain-specific |
+| `solana` | native Solana **and** Anchor | `invoke`, `spl_token`, sysvars, PDAs, CPIs |
+| `anchor` | Anchor only | `#[derive(Accounts)]`, `#[account(..)]`, `Context` |
+| `stylus` | Stylus (Arbitrum) only | `stylus-sdk` constructs |
+
+An accent is a **floor, not an exact match**: a scan runs its framework's accent
+plus everything more general. Anchor gets `anchor` + `solana` + `rust`; native
+Solana gets `solana` + `rust`; Stylus gets `stylus` + `rust`.
+
+That distinction matters more than it looks. Most rules carrying Solana logic
+were marked `anchor` regardless of whether they needed Anchor syntax, and a
+native program would never have run them. `unvalidated_sysvar_accounts` reaching
+Wormhole - which uses solitaire, not Anchor - depends on it.
+
+Reach for `anchor` only when the rule genuinely cannot fire without Anchor
+syntax. If it keys on something every Solana program has, it is `solana`.
+
+When no manifest identifies a framework, radar runs **everything**. That is the
+honest answer for a source that claims nothing, and the alternative is running
+fewer checks on the code we know least about.
+
+**`protocol` - what the program integrates with.**
+
+Optional, and absent for almost every rule. Set it when a check only makes sense
+for programs built against a specific protocol - Squads' membership rules,
+Metaplex's metadata invariants, antegen's thread ownership. Radar reads the
+scanned source's manifests and runs a protocol's rules only when it depends on
+that protocol, so no flag is needed for the ordinary case.
+
+Protocol rules live in `api/builtin_templates/protocol/<name>/`.
+
+A protocol rule should still gate on its own constructs in the first lines.
+Depending on a crate is not the same as using it: a repo may pull in
+`mpl-token-metadata` for one helper and should not collect the whole Metaplex
+pack as noise.
+
 ## Template example
 
 ```yaml
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: anchor      # rust | solana | anchor | stylus - see below
+protocol: squads   # optional - only for programs that depend on this protocol
 name: Issue name here
 description: Issue technical description here 
 severity: Medium (filter templates for example via --ignore low,medium)

@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Unchecked CPI Program Invoke
 description: Raw invoke calls that use a caller-supplied program_id without key validation allow attackers to redirect cross-program invocations to malicious programs, bypassing Anchor typed program checks.
 severity: High

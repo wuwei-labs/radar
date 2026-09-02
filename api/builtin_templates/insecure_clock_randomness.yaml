@@ -1,6 +1,6 @@
 version: 0.1.0
 author: forefy
-accent: anchor
+accent: solana
 name: Insecure Clock Randomness
 description: Using Clock::get() slot or unix_timestamp as a randomness source via modulo or hash input is insecure because validators can influence these values.
 severity: Medium

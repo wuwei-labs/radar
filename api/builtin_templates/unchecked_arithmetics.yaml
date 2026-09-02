@@ -1,6 +1,6 @@
 version: 0.1.1
 author: avigaildanesh
-accent: anchor
+accent: rust
 name: Unchecked Arithmetics
 description: Arithmetic operations without overflow checks can lead to unexpected behavior, incorrect calculations, or security vulnerabilities when values exceed their maximum limits.
 severity: Low

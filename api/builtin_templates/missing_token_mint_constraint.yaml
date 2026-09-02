@@ -1,6 +1,6 @@
 version: 0.1.5
 author: forefy
-accent: anchor
+accent: solana
 name: Missing Token Mint Constraint
 description: Anchor account structs that accept TokenAccount fields without token::mint constraints can allow wrong-mint token accounts to be passed into sensitive flows.
 severity: Medium
@@ -16,14 +16,6 @@ rule: |
                       continue
                   account_node = token_account_node.parent
 
-                  # The field and its struct are derived from the access path
-                  # rather than by counting `.parent` hops. A field written
-                  # `Box<Account<'info, TokenAccount>>` sits one node deeper
-                  # than a bare `Account<'info, TokenAccount>`, so a fixed
-                  # number of hops lands on the wrong node: `struct_node` ends
-                  # up on the field, its `derive(Accounts)` lookup finds
-                  # nothing, and since the except block below is this rule's
-                  # reporting path, every boxed token account was reported.
                   # Resolved by access path, not by counting `.parent` hops: a
                   # field written `Box<Account<'info, TokenAccount>>` or
                   # `Option<Box<...>>` nests deeper than a bare

@@ -4,6 +4,7 @@ import yaml
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from utils.selection import template_applies
 from api.models import GeneratedAST
 from api.tasks import run_scan_task
 from utils.ast import (
@@ -27,6 +28,7 @@ class GenerateASTView(APIView):
         source_type = request.data.get("source_type")
         source_path = request.data.get(f"{source_type}_path")
         framework = request.data.get("framework", "unknown")
+        protocols = request.data.get("protocols", []) or []
 
         if not source_type or not source_path:
             return Response(
@@ -169,6 +171,7 @@ class GenerateASTView(APIView):
             "folder_path": source_path if source_type == "folder" else None,
             "language": language,
             "framework": framework,
+            "protocols": protocols,
         }
         serializer = GenerateASTSerializer(data=serializer_data)
 
@@ -221,6 +224,7 @@ class RunScanView(APIView):
         # Get the detected language and framework from the AST
         detected_language = generated_ast.language if generated_ast else "rust"
         detected_framework = generated_ast.framework if generated_ast else "unknown"
+        detected_protocols = set(getattr(generated_ast, "protocols", None) or [])
 
         for yaml_file in yaml_files:
             yaml_data = None
@@ -234,17 +238,16 @@ class RunScanView(APIView):
                 )
 
             if yaml_data is not None:
-                # Filter templates by language - only run templates that match detected language
-                template_language = yaml_data.get("language", "rust")
-                if template_language != detected_language:
+                # accent + protocol selection; see api/utils/selection.py for
+                # why an accent is a floor rather than an exact match.
+                if not template_applies(
+                    yaml_data,
+                    detected_language,
+                    detected_framework,
+                    detected_protocols,
+                ):
                     continue
-                
-                # Filter by framework/accent for rust templates
-                template_accent = yaml_data.get("accent", "")
-                if detected_language == "rust" and template_accent and detected_framework != "unknown":
-                    if template_accent != detected_framework:
-                        continue
-                
+
                 result = run_scan_task.apply_async(
                     kwargs={
                         "yaml_data": yaml_data,
