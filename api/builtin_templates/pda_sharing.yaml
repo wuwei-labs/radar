@@ -29,9 +29,19 @@ rule: |
               for index in range(len(siblings)):
                   if siblings[index].access_path != seeds_attr.access_path:
                       continue
-                  # The seed array follows the `seeds` token; its leading
-                  # element is the domain constant (`VAULT_SEED`, `b"vault"`).
-                  for offset in range(index + 1, min(index + 4, len(siblings))):
+                  # The seed array follows the `seeds` token, and its leading
+                  # element is whatever constant this program derives that PDA
+                  # with - a `&[u8]` const, a byte literal, whatever it named
+                  # it. Nothing here is keyed to a particular program or a
+                  # particular spelling; the set is only ever what the sources
+                  # under scan declared about themselves.
+                  #
+                  # Bounded by hand: the sandbox allows only print/len/range/
+                  # dict/list/tuple/set/type, so `min` is not available here.
+                  upper = index + 4
+                  if upper > len(siblings):
+                      upper = len(siblings)
+                  for offset in range(index + 1, upper):
                       ident = siblings[offset].ident
                       if ident is not None and ident not in ("seeds", "bump"):
                           declared_seeds.add(ident)
