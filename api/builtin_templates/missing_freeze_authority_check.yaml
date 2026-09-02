@@ -1,4 +1,4 @@
-version: 0.1.1
+version: 0.1.2
 author: forefy
 accent: anchor
 name: Missing Freeze Authority Check
@@ -29,6 +29,22 @@ rule: |
                   struct_node.find_chained_calls("derive", "Accounts").exit_on_none()
                   struct_node.find_by_names("TokenAccount").exit_on_none()
                   struct_node.find_by_names("freeze_authority").exit_on_value()
+
+                  # A mint pinned with `address = ...` is not one the caller
+                  # chose. This reports accepting deposits in an arbitrary
+                  # token whose issuer can freeze the account; when the program
+                  # names the mint, that decision was made once and
+                  # deliberately, and re-checking `freeze_authority` at runtime
+                  # would only reject the token the program exists to handle.
+                  mint_field_path = field_node.access_path + "."
+                  pinned = False
+                  for candidate in nodes.find_macro_attribute_by_names("address"):
+                      if candidate.access_path.startswith(mint_field_path):
+                          pinned = True
+                          break
+                  if pinned:
+                      continue
+
                   if struct_node.ident in flagged_structs:
                       continue
                   for function in nodes.find_all_functions():
