@@ -1,4 +1,4 @@
-version: 0.2.0
+version: 0.3.0
 author: forefy
 accent: anchor
 name: PDA Sharing
@@ -7,6 +7,39 @@ severity: Low
 certainty: Low
 vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/pda_sharing/bad/src/lib.rs
 rule: |
+  # Pass 1 --- collect the seeds this program declares its own PDAs with.
+  #
+  # A PDA that signs with the seeds it was itself derived from is exercising
+  # authority over itself, not authority shared across domains. The declaration
+  # proving that is an `#[account(seeds = [...])]` in `instructions/`, while the
+  # signing is often a method on the state type in `state/`, or a helper in
+  # `utils.rs` - files that contain no accounts struct at all, so the in-file
+  # check below never engages and every such signer is reported.
+  #
+  # `ast` spans every source in the scan and re-iterates, so collect first and
+  # decide second, the same way `init_if_needed_reinitialization` resolves its
+  # guards. This does not weaken the canonical bug: there the pool signs with
+  # `[pool.mint]` and nothing declares seeds for it, so pass 1 collects nothing
+  # and the finding stands.
+  declared_seeds = set()
+  for source, nodes in ast:
+      try:
+          for seeds_attr in nodes.find_macro_attribute_by_names("seeds"):
+              siblings = seeds_attr.parent.children
+              for index in range(len(siblings)):
+                  if siblings[index].access_path != seeds_attr.access_path:
+                      continue
+                  # The seed array follows the `seeds` token; its leading
+                  # element is the domain constant (`VAULT_SEED`, `b"vault"`).
+                  for offset in range(index + 1, min(index + 4, len(siblings))):
+                      ident = siblings[offset].ident
+                      if ident is not None and ident not in ("seeds", "bump"):
+                          declared_seeds.add(ident)
+                          break
+                  break
+      except:
+          continue
+
   for source, nodes in ast:
       try:
           # PDA sharing is a risk only when the program signs a CPI with a PDA.
@@ -37,6 +70,17 @@ rule: |
                       break
 
           if len(struct_paths) and len(seeded) == len(struct_paths):
+              continue
+
+          # The signing seeds are the ones this program derives its own PDAs
+          # with, so the signer is the account those seeds name rather than one
+          # shared across domains. Pass 1 gathered them from every file.
+          signs_with_declared_seed = False
+          for candidate in nodes.find_by_access_path(""):
+              if candidate.ident is not None and candidate.ident in declared_seeds:
+                  signs_with_declared_seed = True
+                  break
+          if signs_with_declared_seed:
               continue
 
           # When the signing seeds are built inline (not via `#[account(seeds)]`),
