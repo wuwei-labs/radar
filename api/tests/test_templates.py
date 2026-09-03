@@ -23,6 +23,27 @@ def extract_line_info(location):
     return location
 
 
+def to_mock_relative_path(location: str) -> str:
+    """Trim a detection location to the part starting at `tests/mocks/`.
+
+    Expectations used to be reassembled from the mock folder plus a hardcoded
+    `src/lib.rs`, which silently assumed every Rust mock was a bare crate with
+    exactly one source. A workspace-shaped mock has neither property, and a
+    multi-file variant can report findings in different files. The location the
+    rule produced already names the file it found, so read it from there.
+
+    Returns "" when the path is not under the mocks tree (Solidity project ASTs
+    use relative source-unit names), leaving the caller to reassemble.
+    """
+    path, _, line_info = location.rpartition(":")
+    path, _, col_info = path.rpartition(":")
+    marker = "tests/mocks/"
+    index = path.find(marker)
+    if index == -1:
+        return ""
+    return f"{path[index:]}:{col_info}:{line_info}"
+
+
 def get_mock_sol_filename(mock_folder: Path, kind: str) -> str:
     """Return the .sol filename (if any) inside mock_folder/kind/."""
     sol_files = list((mock_folder / kind).glob("*.sol"))
@@ -36,20 +57,20 @@ def get_mock_sol_filename(mock_folder: Path, kind: str) -> str:
 EXPECTED_DETECTIONS = {
     "Account Data Matching": {
         "bad": [
-            "tests/mocks/account_data_matching/bad/src/lib.rs:13:46-52"
+            "tests/mocks/account_data_matching/bad/programs/account_data_matching/src/lib.rs:13:46-52"
         ], 
         "good": []
     },
     "Account Precreation DoS": {
-        "bad": ["tests/mocks/account_precreation_dos/bad/src/lib.rs:9:12-27"],
+        "bad": ["tests/mocks/account_precreation_dos/bad/programs/account_precreation_dos/src/lib.rs:9:12-27"],
         "good": []
     },
     "Account Reinitialization": {
-        "bad": ["tests/mocks/account_reinitialization/bad/src/lib.rs:11:12-22"],
+        "bad": ["tests/mocks/account_reinitialization/bad/programs/account_reinitialization/src/lib.rs:11:12-22"],
         "good": []
     },
     "Arbitrary Cross-Program Invocation": {
-        "bad": ["tests/mocks/arbitrary_cross_program_invocation/bad/src/lib.rs:10:12-24"],
+        "bad": ["tests/mocks/arbitrary_cross_program_invocation/bad/programs/arbitrary_cross_program_invocation/src/lib.rs:10:12-24"],
         "good": []
     },
     "Arbitrary External Call": {
@@ -65,11 +86,11 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Closing Accounts Insecurely": {
-        "bad": ["tests/mocks/closing_accounts_insecurely/bad/src/lib.rs:11:64-74"],
+        "bad": ["tests/mocks/closing_accounts_insecurely/bad/programs/closing_accounts_insecurely/src/lib.rs:11:64-74"],
         "good": []
     },
     "Random Authority Generation": {
-        "bad": ["tests/mocks/cpi_authority_bypass/bad/src/lib.rs:10:33-43"],
+        "bad": ["tests/mocks/cpi_authority_bypass/bad/programs/cpi_authority_bypass/src/lib.rs:10:33-43"],
         "good": []
     },
     "Read-Only Reentrancy": {
@@ -77,11 +98,11 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
      "PDA Sharing": {
-        "bad": ["tests/mocks/pda_sharing/bad/src/lib.rs:23:16-24"],
+        "bad": ["tests/mocks/pda_sharing/bad/programs/pda_sharing/src/lib.rs:23:16-24"],
         "good": []
     },
     "Division Before Multiplication": {
-        "bad": ["tests/mocks/division_before_multiplication/bad/src/lib.rs:10:20-26"],
+        "bad": ["tests/mocks/division_before_multiplication/bad/programs/division_before_multiplication/src/lib.rs:10:20-26"],
         "good": []
     },
     "Exponential Calculation Complexity": {
@@ -104,7 +125,7 @@ EXPECTED_DETECTIONS = {
     },
     "Insecure Clock Randomness": {
         "bad": [
-            "tests/mocks/insecure_clock_randomness/bad/src/lib.rs:11:35-49"
+            "tests/mocks/insecure_clock_randomness/bad/programs/insecure_clock_randomness/src/lib.rs:11:35-49"
         ],
         "good": []
     },
@@ -123,39 +144,39 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Missing Freeze Authority Check": {
-        "bad": ["tests/mocks/missing_freeze_authority_check/bad/src/lib.rs:28:9-13"],
+        "bad": ["tests/mocks/missing_freeze_authority_check/bad/programs/missing_freeze_authority_check/src/lib.rs:28:9-13"],
         "good": []
     },
     "Missing has_one Constraint": {
-        "bad": ["tests/mocks/missing_has_one_constraint/bad/src/lib.rs:15:3-9"],
+        "bad": ["tests/mocks/missing_has_one_constraint/bad/programs/missing_has_one_constraint/src/lib.rs:15:3-9"],
         "good": []
     },
     "Missing Owner Check": {
-        "bad": ["tests/mocks/missing_owner_check/bad/src/lib.rs:21:3-9"],
+        "bad": ["tests/mocks/missing_owner_check/bad/programs/missing_owner_check/src/lib.rs:21:3-9"],
         "good": []
     },
     "Missing Rent Exemption Check": {
-        "bad": ["tests/mocks/missing_rent_exemption_check/bad/src/lib.rs:11:38-52"],
+        "bad": ["tests/mocks/missing_rent_exemption_check/bad/programs/missing_rent_exemption_check/src/lib.rs:11:38-52"],
         "good": []
     },
     "Missing Token Authority Constraint": {
-        "bad": ["tests/mocks/missing_token_authority_constraint/bad/src/lib.rs:29:21-28"],
+        "bad": ["tests/mocks/missing_token_authority_constraint/bad/programs/missing_token_authority_constraint/src/lib.rs:29:21-28"],
         "good": []
     },
     "Missing Token Mint Constraint": {
-        "bad": ["tests/mocks/missing_token_mint_constraint/bad/src/lib.rs:25:21-28"],
+        "bad": ["tests/mocks/missing_token_mint_constraint/bad/programs/missing_token_mint_constraint/src/lib.rs:25:21-28"],
         "good": []
     },
     "Missing Signer Check": {
-        "bad": ["tests/mocks/missing_signer_check/bad/src/lib.rs:15:3-9"],
+        "bad": ["tests/mocks/missing_signer_check/bad/programs/missing_signer_check/src/lib.rs:15:3-9"],
         "good": []
     },
     "Type Cosplay": {
-        "bad": ["tests/mocks/type_cosplay/bad/src/lib.rs:14:26-40"],
+        "bad": ["tests/mocks/type_cosplay/bad/programs/type_cosplay/src/lib.rs:14:26-40"],
         "good": []
     },
     "Unchecked Arithmetics": {
-        "bad": ["tests/mocks/unchecked_arithmetics/bad/src/lib.rs:16:22-25"],
+        "bad": ["tests/mocks/unchecked_arithmetics/bad/src/lib.rs:16:39-42"],
         "good": []
     },
     "Immutable State Mutation": {
@@ -328,11 +349,11 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Unchecked Close Target": {
-        "bad": ["tests/mocks/unchecked_close_target/bad/src/lib.rs:16:28-34"],
+        "bad": ["tests/mocks/unchecked_close_target/bad/programs/unchecked_close_target/src/lib.rs:16:28-34"],
         "good": []
     },
     "Unchecked CPI Program Invoke": {
-        "bad": ["tests/mocks/unchecked_cpi_program_invoke/bad/src/lib.rs:10:43-53"],
+        "bad": ["tests/mocks/unchecked_cpi_program_invoke/bad/programs/unchecked_cpi_program_invoke/src/lib.rs:12:13-23"],
         "good": []
     },
     "Unchecked Low-Level Call Return": {
@@ -340,23 +361,23 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Unchecked Token Account Owner": {
-        "bad": ["tests/mocks/unchecked_token_account_owner/bad/src/lib.rs:29:15-22"],
+        "bad": ["tests/mocks/unchecked_token_account_owner/bad/programs/unchecked_token_account_owner/src/lib.rs:29:15-22"],
         "good": []
     },
     "Anchor Spot Price Oracle": {
-        "bad": ["tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs:13:34-45"],
+        "bad": ["tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs:13:34-45"],
         "good": []
     },
     "Anchor Missing Min Output": {
-        "bad": ["tests/mocks/anchor_missing_min_output/bad/src/lib.rs:9:53-60"],
+        "bad": ["tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs:9:53-60"],
         "good": []
     },
     "Anchor Reward Overflow": {
-        "bad": ["tests/mocks/anchor_reward_overflow/bad/src/lib.rs:12:40-53"],
+        "bad": ["tests/mocks/anchor_reward_overflow/bad/programs/anchor_reward_overflow/src/lib.rs:12:40-53"],
         "good": []
     },
     "Decimal To U64 Without Sign Check": {
-        "bad": ["tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs:15:14-20"],
+        "bad": ["tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs:15:14-20"],
         "good": []
     },
     "Token Decimal Mismatch": {
@@ -368,13 +389,13 @@ EXPECTED_DETECTIONS = {
     },
     "Anchor Admin Without Timelock": {
         "bad": [
-            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:10:28-46",
-            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:15:28-36"
+            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:10:28-46",
+            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:15:28-36"
         ],
         "good": []
     },
     "Missing Transfer Amount Validation": {
-        "bad": ["tests/mocks/missing_transfer_amount_validation/bad/src/lib.rs:24:16-24"],
+        "bad": ["tests/mocks/missing_transfer_amount_validation/bad/programs/missing_transfer_amount_validation/src/lib.rs:24:16-24"],
         "good": []
     },
     "State Updated Before External Call": {
@@ -382,15 +403,15 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Init If Needed Reinitialization": {
-        "bad": ["tests/mocks/init_if_needed_reinitialization/bad/src/lib.rs:18:15-29"],
+        "bad": ["tests/mocks/init_if_needed_reinitialization/bad/programs/init_if_needed_reinitialization/src/instructions/initialize.rs:9:15-29"],
         "good": []
     },
     "Unconstrained UncheckedAccount": {
-        "bad": ["tests/mocks/unconstrained_uncheckedaccount/bad/src/lib.rs:18:17-33"],
+        "bad": ["tests/mocks/unconstrained_uncheckedaccount/bad/programs/unconstrained_uncheckedaccount/src/lib.rs:18:17-33"],
         "good": []
     },
     "Invoke Signed Unvalidated Seeds": {
-        "bad": ["tests/mocks/invoke_signed_unvalidated_seeds/bad/src/lib.rs:12:18-31"],
+        "bad": ["tests/mocks/invoke_signed_unvalidated_seeds/bad/programs/invoke_signed_unvalidated_seeds/src/lib.rs:12:18-31"],
         "good": []
     },
     "Stylus Missing Reentrancy Guard": {
@@ -398,7 +419,7 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Mint Decimals Scaling Ignored": {
-        "bad": ["tests/mocks/mint_decimals_scaling_ignored/bad/src/lib.rs:11:31-43"],
+        "bad": ["tests/mocks/mint_decimals_scaling_ignored/bad/programs/mint_decimals_scaling_ignored/src/lib.rs:11:31-43"],
         "good": []
     },
     "Chainlink L2 Sequencer Uptime Not Checked": {
@@ -525,12 +546,30 @@ def run_template_on_ast(yaml_data, ast_file, language: str = "rust"):
     return result
 
 
-def run_template_on_rust_source(yaml_data, source_file: Path):
+def run_template_on_rust_sources(yaml_data, source_files):
+    """Run a rule over one AST built from every source in `source_files`.
+
+    A scan builds the AST for a whole crate and hands the rule all of it at
+    once, which is what lets a cross-file rule work: `ast` re-iterates, so a
+    first pass can collect declarations from one file and a second pass judge
+    uses of them in another. Parsing each file into its own AST - the shape
+    this helper replaced - makes that rule structurally unable to fire in the
+    harness while working fine in production, so the mock proves nothing.
+
+    Each item carries the path it was enriched from, so locations stay
+    per-file even though the parse is per-variant.
+    """
     code = yaml_data["rule"]
-    ast_data = generate_ast_for_rust_file(source_file)["ast"]
+    ast_data = []
+    for source_file in source_files:
+        ast_data.extend(generate_ast_for_rust_file(source_file)["ast"])
     modified_code = inject_code_lines(code, [f"ast = parse_ast({ast_data}, language='rust').items()"])
     template_outputs = wrapped_exec(modified_code)
     return process_template_outputs(template_outputs, yaml_data)
+
+
+def run_template_on_rust_source(yaml_data, source_file: Path):
+    return run_template_on_rust_sources(yaml_data, [source_file])
 
 
 # Templates that cannot fire under the current architecture, with the reason.
@@ -590,8 +629,10 @@ def test_template_accuracy(template_data):
     bad_source_file = template_data.get("bad_source_file", "src/lib.rs")
     detected_with_relative_paths = []
     for loc in bad_locations:
-        line_info = extract_line_info(loc)
-        relative_path = f"tests/mocks/{template_data['mock_folder']}/bad/{bad_source_file}:{line_info}"
+        relative_path = to_mock_relative_path(loc)
+        if not relative_path:
+            line_info = extract_line_info(loc)
+            relative_path = f"tests/mocks/{template_data['mock_folder']}/bad/{bad_source_file}:{line_info}"
         detected_with_relative_paths.append(relative_path)
     
     detected_set = set(detected_with_relative_paths)
@@ -672,32 +713,32 @@ RUNTIME_RUST_TEMPLATES = [
     {
         "name": "Anchor Spot Price Oracle",
         "yaml_file": Path("builtin_templates/anchor_spot_price_oracle.yaml"),
-        "bad_source": Path("tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_spot_price_oracle/good/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs:13:34-45"],
+        "bad_source": Path("tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_spot_price_oracle/good/programs/anchor_spot_price_oracle/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs:13:34-45"],
     },
     {
         "name": "Anchor Missing Min Output",
         "yaml_file": Path("builtin_templates/anchor_missing_min_output.yaml"),
-        "bad_source": Path("tests/mocks/anchor_missing_min_output/bad/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_missing_min_output/good/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/anchor_missing_min_output/bad/src/lib.rs:9:53-60"],
+        "bad_source": Path("tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_missing_min_output/good/programs/anchor_missing_min_output/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs:9:53-60"],
     },
     {
         "name": "Decimal To U64 Without Sign Check",
         "yaml_file": Path("builtin_templates/decimal_to_u64_without_sign_check.yaml"),
-        "bad_source": Path("tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs"),
-        "good_source": Path("tests/mocks/decimal_to_u64_without_sign_check/good/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs:15:14-20"],
+        "bad_source": Path("tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs"),
+        "good_source": Path("tests/mocks/decimal_to_u64_without_sign_check/good/programs/decimal_to_u64_without_sign_check/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs:15:14-20"],
     },
     {
         "name": "Anchor Admin Without Timelock",
         "yaml_file": Path("builtin_templates/anchor_admin_without_timelock.yaml"),
-        "bad_source": Path("tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_admin_without_timelock/good/src/lib.rs"),
+        "bad_source": Path("tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_admin_without_timelock/good/programs/anchor_admin_without_timelock/src/lib.rs"),
         "expected_bad_locations": [
-            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:10:28-46",
-            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:15:28-36",
+            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:10:28-46",
+            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:15:28-36",
         ],
     },
 ]

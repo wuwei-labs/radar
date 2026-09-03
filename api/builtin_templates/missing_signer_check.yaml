@@ -5,7 +5,7 @@ name: Missing Signer Check
 description: When an instruction does not verify that a caller signed the transaction, any account may be passed in its place. Anchor proves this with a Signer field, or the handler can check is_signer directly.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_signer_check/bad/src/lib.rs#L10
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_signer_check/bad/programs/missing_signer_check/src/lib.rs#L10
 rule: |
   for source, nodes in ast:
       try:

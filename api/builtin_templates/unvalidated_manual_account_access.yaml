@@ -11,7 +11,7 @@ description: >-
   proof has to be on the path that touches the data.
 severity: High
 certainty: Medium
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/unvalidated_manual_account_access/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/unvalidated_manual_account_access/bad/programs/unvalidated_manual_account_access/src/lib.rs
 rule: |
   for source, nodes in ast:
       try:

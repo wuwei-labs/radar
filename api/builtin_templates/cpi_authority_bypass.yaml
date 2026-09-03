@@ -5,7 +5,7 @@ name: Random Authority Generation
 description: Detects generation of random/unique Pubkey for authority which bypasses proper authority validation.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/cpi_authority_bypass/bad/src/lib.rs#L10-L11
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/cpi_authority_bypass/bad/programs/cpi_authority_bypass/src/lib.rs#L10-L11
 rule: |
   for source, nodes in ast:
       try:

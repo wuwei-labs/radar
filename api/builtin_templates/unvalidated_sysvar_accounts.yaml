@@ -5,7 +5,7 @@ name: Unvalidated Sysvar Account
 description: A sysvar passed as a raw AccountInfo or UncheckedAccount is not checked against the sysvar's well-known address, so a caller can substitute an account of their own and control what the instruction reads. Anchor's Sysvar type or an address constraint pins it.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/unvalidated_sysvar_accounts/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/unvalidated_sysvar_accounts/bad/programs/unvalidated_sysvar_accounts/src/lib.rs
 rule: |
   sysvars = [
       "clock", "epoch_schedule", "instructions", "rent", "rewards",

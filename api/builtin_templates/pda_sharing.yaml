@@ -5,7 +5,7 @@ name: PDA Sharing
 description: Reuse of a PDA across multiple authority domains can lead to unauthorized data or funds access.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/pda_sharing/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/pda_sharing/bad/programs/pda_sharing/src/lib.rs
 rule: |
   # Pass 1 --- collect the seeds this program declares its own PDAs with.
   #

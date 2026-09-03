@@ -5,7 +5,7 @@ name: Type Cosplay
 description: Type cosplay vulnerability occurs when a program fails to validate that an account is of the expected type, allowing malicious accounts to masquerade as legitimate program accounts.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/type_cosplay/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/type_cosplay/bad/programs/type_cosplay/src/lib.rs
 rule: |
   for source, nodes in ast:
       try:

@@ -5,7 +5,7 @@ name: Missing Owner Check
 description: Deserializing or unpacking a raw account's data without verifying the account is owned by the expected program lets a caller substitute an attacker-controlled account with a compatible layout. The account's owner should be checked against the program ID, or the account should be typed as Anchor's Account<T> which validates it.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_owner_check/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_owner_check/bad/programs/missing_owner_check/src/lib.rs
 rule: |
   for source, nodes in ast:
       try:

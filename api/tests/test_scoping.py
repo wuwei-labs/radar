@@ -1,10 +1,15 @@
-"""Live bad/good gate for Anchor templates.
+"""Live bad/good gate for Rust templates.
 
 `test_template_accuracy` only checks templates that have both recorded
 expected-line metadata and a prebuilt `ast.json` fixture pair, which excludes
-most Anchor rules. This drives each Anchor template against its `bad/` and
-`good/` Rust mocks through the real parser so a rule that stops detecting its
-bug, fires on the safe variant, or throws is caught in CI.
+most Rust rules. This drives each Rust template against its `bad/` and `good/`
+mocks through the real parser so a rule that stops detecting its bug, fires on
+the safe variant, or throws is caught in CI.
+
+The variant is parsed as one unit rather than file by file, matching a real
+scan: a rule whose first pass collects from `state/` and whose second judges
+`instructions/` is otherwise unable to fire here even though it works in
+production, and its mock proves nothing.
 
 It parses Rust live (via `rust_syn`), so it is marked `active_runtime` and runs
 under `make test-all` / the Docker image, not the fixture-only `make test`.
@@ -12,15 +17,21 @@ under `make test-all` / the Docker image, not the fixture-only `make test`.
 
 import pytest
 
-from tests.check_scoping import anchor_stems_with_rust_fixtures, scan_variants
+from tests.check_scoping import rust_stems_with_fixtures, scan_variants
 
-STEMS = anchor_stems_with_rust_fixtures()
+STEMS = rust_stems_with_fixtures()
 
-# Every Anchor template with Rust fixtures is now expected to detect its bad
-# mock and stay clean on good. (Three rules that missed their own fixtures were
-# repaired; keep this set empty so a future regression fails loudly rather than
-# hiding behind an xfail.)
-KNOWN_BROKEN = set()
+# Every Rust template with bad/good fixtures is expected to detect its bad mock
+# and stay clean on good. Keep this set as small as it can be: an entry here is
+# coverage the scanner does not have, and the reason has to be structural
+# rather than "the rule needs work".
+KNOWN_BROKEN = {
+    # Keys on Rust doc comments, which reach syn as a synthesized `doc`
+    # attribute with no counterpart in the source text, so span resolution
+    # drops the node before the DSL sees it. Same reason `test_templates`
+    # lists it in ARCHITECTURALLY_UNDETECTABLE; needs real parser spans.
+    "missing_security_documentation",
+}
 
 
 @pytest.mark.active_runtime
@@ -45,4 +56,4 @@ def test_anchor_template_scoping(stem, request):
 
 def test_scoping_gate_covers_templates():
     """Guard against the gate silently covering nothing (empty parametrization)."""
-    assert STEMS, "No Anchor templates with Rust bad/good fixtures were discovered"
+    assert STEMS, "No Rust templates with bad/good fixtures were discovered"
