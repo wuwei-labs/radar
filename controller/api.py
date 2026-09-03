@@ -64,9 +64,11 @@ def handle_response(response):
         sys.exit(2)
 
 
-def generate_ast_for_file_or_folder(path: Path, path_type: str):
+def generate_ast_for_file_or_folder(path: Path, path_type: str, include_tests: bool = False):
     # Detect and show language before AST generation
     language, framework, protocols = detect_language_from_path(path)
+    if not include_tests:
+        print("[i] Skipping test code (--include-tests to scan it)")
     if language != "unknown":
         print(f"[i] Language detected: {language}")
         if framework != "unknown":
@@ -89,6 +91,7 @@ def generate_ast_for_file_or_folder(path: Path, path_type: str):
                 f"{path_type}_path": str(path),
                 "framework": framework,
                 "protocols": protocols,
+                "include_tests": include_tests,
             },
         )
         result = handle_response(response)
