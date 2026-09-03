@@ -51,7 +51,7 @@ jobs:
 
   # Template accuracy gate: parses Rust live via rust_syn, so it builds the
   # native extension first. Runs the span-agnostic bad/good scoping gate over
-  # every Anchor template (see api/tests/test_scoping.py).
+  # every Rust template (see api/tests/test_scoping.py).
   template-gate:
     runs-on: ubuntu-latest
     steps:
@@ -91,3 +91,17 @@ jobs:
       - name: Run span-accuracy gate
         working-directory: api/
         run: poetry run pytest tests/test_span_accuracy.py -q
+
+      - name: Generate mock AST fixtures (Rust)
+        # The fast `test` job has no rust_syn, so it generates Solidity fixtures
+        # only and every Rust accuracy test there skips - silently, because a
+        # skip is not a failure. Two rules drifted off their recorded spans that
+        # way and stayed green. Generate here, where the extension exists, and
+        # run the suite again below; between the two jobs both languages are
+        # actually exercised.
+        working-directory: api/
+        run: poetry run python scripts/generate_fixtures.py || true
+
+      - name: Run template accuracy suite (Rust fixtures)
+        working-directory: api/
+        run: poetry run pytest tests/test_templates.py -q
