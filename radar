@@ -555,24 +555,33 @@ fi
 
 cd "$INITIAL_DIR"
 
-# Determine output file paths based on whether output_directory is a file or directory
-if [[ "$output_directory" == *".sarif" ]]; then
-    output_file="$output_directory"
-    docker cp radar-api:/radar_data/output.sarif "$output_file" >/dev/null 2>&1
-    echo "[i] Results written to $output_file"
-elif [[ "$output_directory" == *".md" ]]; then
-    output_file="$output_directory"
-    docker cp radar-api:/radar_data/output.md "$output_file" >/dev/null 2>&1
-    echo "[i] Results written to $output_file"
-elif [[ "$output_directory" == *".json" ]]; then
-    output_file="$output_directory"
-    docker cp radar-api:/radar_data/output.json "$output_file" >/dev/null 2>&1
-    echo "[i] Results written to $output_file"
-else
-    mkdir -p "$output_directory"
-    output_dir="${output_directory%/}"
-    output_file="$output_dir/output.json"
-    docker cp radar-api:/radar_data/output.json "$output_file" >/dev/null 2>&1
+# Determine output file paths based on whether output_directory is a file or
+# directory. The report name inside the container follows the extension asked
+# for; a directory gets the JSON report under its default name.
+case "$output_directory" in
+    *.sarif)
+        output_file="$output_directory"
+        report="output.sarif"
+        ;;
+    *.md)
+        output_file="$output_directory"
+        report="output.md"
+        ;;
+    *.json)
+        output_file="$output_directory"
+        report="output.json"
+        ;;
+    *)
+        mkdir -p "$output_directory"
+        output_file="${output_directory%/}/output.json"
+        report="output.json"
+        ;;
+esac
+
+# Only claim the file was written when the copy succeeded. A clean scan writes
+# no report at all, so announcing one unconditionally points the user - or a CI
+# step - at a path that does not exist.
+if docker cp "radar-api:/radar_data/$report" "$output_file" >/dev/null 2>&1; then
     echo "[i] Results written to $output_file"
 fi
 
@@ -583,8 +592,8 @@ if [ "$generate_ast" = true ]; then
         output_dir="${output_directory%/}"
         ast_output="$output_dir/ast.json"
     fi
-    echo "[i] Generating AST file at $ast_output"
-    docker cp radar-api:/radar_data/ast.json "$ast_output" >/dev/null 2>&1
+    docker cp radar-api:/radar_data/ast.json "$ast_output" >/dev/null 2>&1 \
+        && echo "[i] AST written to $ast_output"
 fi
 if [ "$write_baseline" = true ] && [ -n "$baseline_file" ]; then
     docker cp radar-api:/radar_data/baseline.json "$baseline_file" >/dev/null 2>&1 \
