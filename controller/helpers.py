@@ -127,6 +127,35 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Snapshot current findings as the baseline instead of reporting/gating",
     )
+    parser.add_argument(
+        "--project-id",
+        type=str,
+        required=False,
+        help=(
+            "Stable identifier for the calling project, derived from its path on "
+            "the host. Everything a scan writes lives under this, so two projects "
+            "scanning at once cannot read or overwrite each other's work"
+        ),
+    )
+    parser.add_argument(
+        "--scan-id",
+        type=str,
+        required=False,
+        help=(
+            "Identifier for this individual run, separating two concurrent scans "
+            "of the same project"
+        ),
+    )
+    parser.add_argument(
+        "--store-sarif",
+        required=False,
+        action="store_true",
+        help=(
+            "Accumulate SARIF results across runs. Reports are written to a "
+            "location that persists between this project's scans instead of one "
+            "belonging to a single run"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -193,14 +222,30 @@ def copy_to_docker_mount(
         raise Exception(f"[e] Failed to copy {path_type} to volume: {str(e)}")
 
 
-def localize_results(results, local_path):
+def localize_results(results, local_path, container_root: Optional[Path] = None):
+    """Rewrite in-container paths back to the paths the caller knows.
+
+    `container_root` is where this scan's copy of the source was staged. It used
+    to be a constant — `/radar_data/contract` for everyone — and was stripped by
+    dropping a hardcoded three leading components. Now that each project stages
+    under its own directory the depth varies, so the root is passed in and
+    removed by name. The old fixed-depth strip stays as the fallback for a
+    location that does not sit under the root, which would otherwise raise.
+    """
     for index, result in enumerate(results):
         result_locations = result.get("locations")
         localized_results = []
         for location in result_locations:
             container_path, location_src = location.split(":", 1)
-            container_path_parts = Path(container_path).parts
-            localized_path = Path(local_path, *container_path_parts[3:])
+            relative = None
+            if container_root is not None:
+                try:
+                    relative = Path(container_path).relative_to(container_root)
+                except ValueError:
+                    relative = None
+            if relative is None:
+                relative = Path(*Path(container_path).parts[3:])
+            localized_path = Path(local_path, relative)
             localized_location = f"{localized_path}:{location_src}"
             localized_results.append(localized_location)
         results[index]["locations"] = localized_results
@@ -290,10 +335,17 @@ def print_write_outputs(
     errors: list | None = None,
     baseline_path: str | None = None,
     write_baseline: bool = False,
+    output_root: Path = Path("/radar_data"),
 ):
-    container_output_file_path = Path(f"/radar_data/output.{output_type}")
-    container_output_path_ast = Path("/radar_data/ast.json")
-    container_baseline_path = Path("/radar_data/baseline.json")
+    # Reports go under the directory this run owns. They used to be written to
+    # fixed names directly in /radar_data, which meant two scans overlapping by
+    # even a second had the second one's report copied out as the first one's —
+    # silently, with no error anywhere to notice.
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    container_output_file_path = output_root / f"output.{output_type}"
+    container_output_path_ast = output_root / "ast.json"
+    container_baseline_path = output_root / "baseline.json"
     errors = errors or []
 
     if ignore_severities:

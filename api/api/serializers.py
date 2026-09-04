@@ -13,4 +13,6 @@ class GenerateASTSerializer(serializers.ModelSerializer):
             "language",
             "framework",
             "protocols",
+            "project_id",
+            "scan_id",
         ]

@@ -26,6 +26,24 @@ class GeneratedAST(models.Model):
         models.CharField(max_length=50), blank=True, null=True, default=list
     )
 
+    # Which project this AST belongs to: a stable hash of the caller's path on
+    # the host, computed by the CLI.
+    #
+    # Rows used to be identified by `folder_path` alone, which is the path
+    # *inside* the container — always `/contract`, for every caller. Two
+    # projects scanning at once therefore wrote rows that looked identical, and
+    # the newest-first lookup handed one project the other's AST. Keying on the
+    # caller is what makes a scan see only its own work.
+    #
+    # Nullable so rows written before this field existed still load, and so an
+    # older CLI that does not send an id keeps working against a newer API.
+    project_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+
+    # Which run within that project. Two scans of the same directory — two
+    # worktrees, two commits in flight — share a project_id and must still not
+    # read each other's rows.
+    scan_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+
     class SourceTypeOptions(models.TextChoices):
         FILE = "file"
         FOLDER = "folder"

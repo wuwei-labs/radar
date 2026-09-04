@@ -188,3 +188,30 @@ A bare marker suppresses any rule on the target line; listing rule ids (space or
 comma separated) suppresses only those. Rule ids match the finding name loosely,
 so `Missing_Signer_Check`, `missing-signer-check`, and `Missing Signer Check` all
 work.
+
+## 6. 🧹 Concurrent scans and cached data
+
+Scans of different projects run at the same time. Each project gets its own
+staging directory, its own AST rows and its own report path, keyed by a hash of
+the path you pass to `-p`. Two runs of the *same* project are separated further
+by a per-run id, so a pre-commit hook firing while a full scan is going, or two
+worktrees of one repo, is fine.
+
+Nothing is wiped between scans. Earlier versions ran `docker compose down -v`
+before every run — that is what limited radar to one scan at a time, and on a
+slow teardown it fell back to a machine-wide `docker system prune --volumes`
+that reached other projects' Docker volumes too.
+
+Clearing cached data is now something you ask for:
+
+```bash
+radar -p . --clean        # this project's AST rows and staged files
+radar --clean all         # every project on this machine
+```
+
+`--clean` acts and exits; it does not scan. Bare `--clean` is scoped to the
+project named by `-p`, so it can only ever discard your own cached work.
+
+Radar keeps the ten most recent AST rows per project and removes each run's
+report directory once the report has been copied out, so the volume stays
+bounded without a wipe.

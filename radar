@@ -27,6 +27,7 @@ usage() {
     echo "  -o, --output          Results output file path (output type controlled by extension e.g. .json/.md/.sarif)     (optional) (default - current directory)"
     echo "  -a, --ast             Additionally output the scanned contract's parsed AST                                    (optional)"
     echo "  -d, --dev             Use development docker-compose file for local builds and enable debug output             (optional)"
+    echo "      --clean [all]     Remove this project's cached scan data and exit; 'all' clears every project              (optional)"
     echo "  -ss, --store-sarif    Store and accumulate SARIF results from previous runs                                    (optional) (default - clean slate)"
     echo "  -u, --update          Check for and pull latest Docker images before running                                   (optional)"
     echo "  -h, --help            Show this help message                                                                   (optional)"
@@ -257,6 +258,8 @@ include_tests=false
 development_mode=false
 store_sarif=false
 check_update=false
+clean_requested=false
+clean_scope="project"
 
 # How old an image has to be before the header says so. Long enough not to nag,
 # short enough to catch a cache that has quietly gone stale.
@@ -308,6 +311,12 @@ while [[ "$#" -gt 0 ]]; do
         -b|--baseline) baseline_file=$(realpath "$2" 2>/dev/null || echo "$2"); shift ;;
         --write-baseline) write_baseline=true ;;
         --include-tests) include_tests=true ;;
+        # Takes an optional "all". Bare --clean is scoped to the project named
+        # by -p, so the reflexive form can only discard your own cached work.
+        --clean|--clear)
+            clean_requested=true
+            if [[ "$2" == "all" ]]; then clean_scope="all"; shift; fi
+            ;;
         -o|--output) output_directory=$(realpath "$2" 2>/dev/null || echo "$2"); shift ;;
         -k|--kill-after) shutdown_containers=true ;;
         -d|--dev) development_mode=true ;;
@@ -457,7 +466,8 @@ if [ "$check_update" = true ] && [ "$development_mode" = false ]; then
     cd "$INITIAL_DIR"
 fi
 
-if [ -z "$path" ]; then
+# `--clean all` is the one invocation that does not need a project to act on.
+if [ -z "$path" ] && ! { [ "$clean_requested" = true ] && [ "$clean_scope" = "all" ]; }; then
     usage
 fi
 
@@ -467,6 +477,22 @@ fi
 if [[ -n "$templates" ]]; then
     templates=$(cd "$templates" && pwd)
 fi
+
+# Identity for everything this invocation writes.
+#
+# project_id hashes the caller's absolute path: stable across runs of one
+# project, distinct between projects. It is what stops two projects scanning at
+# once from reading each other's staged source, AST rows and reports, all of
+# which used to share the single name `/radar_data/contract`.
+#
+# scan_id separates two runs of the *same* project — two worktrees of one repo,
+# or a pre-commit hook firing while a full scan is already going. Second plus
+# pid rather than a uuid so there is nothing new to depend on.
+if [[ -n "$path" ]]; then
+    project_id=$(printf '%s' "$path" | shasum -a 256 | cut -c1-16)
+fi
+scan_id="$(date +%s)-$$"
+
 cd "$RADAR_BASE_DIR"
 
 # In dev mode, sync local code changes to ~/.radar/ BEFORE starting containers
@@ -492,16 +518,20 @@ fi
 checksum_file="docker_checksum.sha"
 current_checksum=$(cat "$compose_file" | shasum -a 256 | cut -d" " -f1)
 
-# Clean up previous runs unless --store-sarif flag is used
-if [ "$store_sarif" = false ]; then
-    echo "[i] Cleaning up previous scan results"
-    
-    # More efficient cleanup: stop containers and remove volumes in one command
-    timeout 30 docker compose -f "$compose_file" down -v --remove-orphans >/dev/null 2>&1 || {
-        echo "[w] Cleanup timed out, forcing cleanup..."
-        docker system prune -f --volumes >/dev/null 2>&1 || true
-    }    
-else
+# Every scan used to begin by running `docker compose down -v --remove-orphans`
+# here, falling back to `docker system prune -f --volumes` when that took more
+# than thirty seconds. It was the only thing bounding the AST table and the
+# shared volume, and it cost more than it was worth:
+#
+#   - it destroyed any scan another project had in flight, which is why radar
+#     could only ever run one at a time;
+#   - the fallback is machine-wide, so a slow teardown deleted Docker volumes
+#     belonging to projects that have nothing to do with radar;
+#   - it restarted the whole stack before every scan, for nothing.
+#
+# Scan data is now scoped per project and pruned per project, so nothing here
+# needs to be destroyed to keep the next scan correct. Removing it is `--clean`.
+if [ "$store_sarif" = true ]; then
     echo "[i] Storing SARIF results - will accumulate with previous runs"
 fi
 
@@ -565,6 +595,28 @@ fi
 
 print_version
 
+# Cleaning needs the API up, since the AST rows live in its database and the
+# staged files live on a volume only its containers mount. Handled here, after
+# the stack has started, and it ends the invocation — `--clean` is a thing you
+# ask for, not something a scan does on your behalf.
+#
+# Through `poetry run`, not the bare `python3` that `radar info` uses: this
+# script imports Django, which only exists in poetry's environment. The plain
+# interpreter is on PATH and fails at the import.
+if [ "$clean_requested" = true ]; then
+    if [ "$clean_scope" = "all" ]; then
+        echo "[i] Removing cached scan data for every project"
+        docker compose -f "$compose_file" exec -T api \
+            poetry run python /api/scripts/radar_clean.py --all
+    else
+        echo "[i] Removing cached scan data for $path"
+        docker compose -f "$compose_file" exec -T api \
+            poetry run python /api/scripts/radar_clean.py --project-id "$project_id"
+    fi
+    cd "$INITIAL_DIR"
+    exit 0
+fi
+
 container_path="/contract"
 if [ -n "$source_directory_or_file" ]; then
     container_path+="/${source_directory_or_file}"
@@ -579,6 +631,7 @@ if [ -n "$baseline_file" ] && [ -f "$baseline_file" ]; then
     docker_command+=" -v \"${baseline_file}\":/baseline:ro"
 fi
 docker_command+=" controller --path \"${path}\" --container-path \"${container_path}\""
+docker_command+=" --project-id \"${project_id}\" --scan-id \"${scan_id}\""
 if [ -n "$templates_directory" ]; then
     docker_command+=" --templates /templates"
     # If templates_directory is a file, pass the original filename
@@ -608,6 +661,9 @@ if [ "$write_baseline" = true ]; then
 elif [ -n "$baseline_file" ] && [ -f "$baseline_file" ]; then
     docker_command+=" --baseline /baseline"
 fi
+if [ "$store_sarif" = true ]; then
+    docker_command+=" --store-sarif"
+fi
 if [ "$development_mode" = true ]; then
     docker_command+=" --debug"
 fi
@@ -634,22 +690,42 @@ fi
 
 cd "$INITIAL_DIR"
 
-# Determine output file paths based on whether output_directory is a file or directory
-if [[ "$output_directory" == *".sarif" ]]; then
-    output_file="$output_directory"
-    copy_out "/radar_data/output.sarif" "$output_file"
-elif [[ "$output_directory" == *".md" ]]; then
-    output_file="$output_directory"
-    copy_out "/radar_data/output.md" "$output_file"
-elif [[ "$output_directory" == *".json" ]]; then
-    output_file="$output_directory"
-    copy_out "/radar_data/output.json" "$output_file"
+# Determine output file paths based on whether output_directory is a file or
+# directory. The report name inside the container follows the extension asked
+# for; a directory gets the JSON report under its default name.
+case "$output_directory" in
+    *.sarif)
+        output_file="$output_directory"
+        report="output.sarif"
+        ;;
+    *.md)
+        output_file="$output_directory"
+        report="output.md"
+        ;;
+    *.json)
+        output_file="$output_directory"
+        report="output.json"
+        ;;
+    *)
+        mkdir -p "$output_directory"
+        output_file="${output_directory%/}/output.json"
+        report="output.json"
+        ;;
+esac
+
+# Reports are read out of the directory this run owns. Copying from the shared
+# top level, as this used to, meant a scan that finished while another was still
+# running could hand back the other one's report under this one's filename.
+#
+# --store-sarif is the exception: accumulating across runs needs a report that
+# outlives any one of them, so it is kept per project instead.
+if [ "$store_sarif" = true ]; then
+    scan_output="/radar_data/$project_id"
 else
-    mkdir -p "$output_directory"
-    output_dir="${output_directory%/}"
-    output_file="$output_dir/output.json"
-    copy_out "/radar_data/output.json" "$output_file"
+    scan_output="/radar_data/$project_id/$scan_id"
 fi
+
+copy_out "$scan_output/$report" "$output_file"
 
 if [ "$generate_ast" = true ]; then
     if [[ "$output_directory" == *.* ]]; then
@@ -658,12 +734,22 @@ if [ "$generate_ast" = true ]; then
         output_dir="${output_directory%/}"
         ast_output="$output_dir/ast.json"
     fi
-    docker cp radar-api:/radar_data/ast.json "$ast_output" >/dev/null 2>&1 \
+    docker cp "radar-api:$scan_output/ast.json" "$ast_output" >/dev/null 2>&1 \
         && echo "[i] AST written to $ast_output"
 fi
 if [ "$write_baseline" = true ] && [ -n "$baseline_file" ]; then
-    docker cp radar-api:/radar_data/baseline.json "$baseline_file" >/dev/null 2>&1 \
+    docker cp "radar-api:$scan_output/baseline.json" "$baseline_file" >/dev/null 2>&1 \
         && echo "[i] Baseline written to $baseline_file"
+fi
+
+# The reports have been copied out, so this run's directory has served its
+# purpose. Removing it here is what keeps the volume from growing a directory
+# per scan forever, and it is scoped to this run: the project's other scans and
+# its cached AST are untouched. Skipped under --store-sarif, where the report is
+# the thing the next run appends to.
+if [ "$store_sarif" = false ]; then
+    docker compose -f "$RADAR_BASE_DIR/$compose_file" exec -T api \
+        rm -rf "$scan_output" >/dev/null 2>&1
 fi
 
 # Propagate the controller's exit code: 0 = clean, 1 = findings at/above the

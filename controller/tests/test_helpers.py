@@ -150,11 +150,16 @@ def test_main_copies_the_scoped_path_not_the_whole_mount(monkeypatch):
 
     `main` imports controller.api, which pulls in requests and reads env at import
     time. Neither belongs in this suite - it is meant to run on a bare pytest with
-    no runtime dependencies - so the module is stubbed at the import boundary."""
+    no runtime dependencies - so the module is stubbed at the import boundary.
+
+    The destination is the other half of the pair: what was scoped gets copied,
+    and it lands under the calling project's directory rather than the shared
+    `/radar_data/contract` every project used to write to."""
     fake_api = types.ModuleType("api")
-    fake_api.generate_ast_for_file_or_folder = lambda *a: {"ast": {}}
-    fake_api.run_scan = lambda *a: None
-    fake_api.poll_results = lambda *a: ([], [])
+    # `**k`: the project and scan ids, and the detection path, travel by keyword.
+    fake_api.generate_ast_for_file_or_folder = lambda *a, **k: {"ast": {}}
+    fake_api.run_scan = lambda *a, **k: None
+    fake_api.poll_results = lambda *a, **k: ([], [])
     monkeypatch.setitem(sys.modules, "api", fake_api)
     monkeypatch.delitem(sys.modules, "main", raising=False)
     import main  # noqa: PLC0415
@@ -171,12 +176,13 @@ def test_main_copies_the_scoped_path_not_the_whole_mount(monkeypatch):
             container_path=str(scoped), output=None, templates=None, path=None,
             ast=False, ignore=None, debug=False, fail_on="low",
             baseline=None, write_baseline=False,
+            project_id="proj1", scan_id="run1", store_sarif=False,
         )
     )
 
     main.main()
 
-    assert copied == [(scoped, Path("/radar_data/contract/src/lib.rs"))]
+    assert copied == [(scoped, Path("/radar_data/proj1/contract/src/lib.rs"))]
 
 
 # --- a clean scan still writes the promised artefact -----------------------
@@ -205,3 +211,68 @@ def test_clean_scan_writes_an_empty_output_file(output_type, expected, tmp_path,
 
     assert written.exists(), f"no {output_type} file written for a clean scan"
     assert expected in written.read_text()
+
+# --- per-project path scoping --------------------------------------------
+
+def _located(path):
+    return [{"name": "R", "locations": [f"{path}:12:3-9"]}]
+
+
+def test_localize_strips_the_project_scoped_container_root():
+    """A location under this scan's staging directory maps back to the caller.
+
+    The root used to be `/radar_data/contract` for every project, and was
+    stripped by dropping three fixed path components. Staging per project makes
+    that depth wrong, so the root is now removed by name.
+    """
+    results = _located("/radar_data/ab12cd34/contract/programs/thread/src/lib.rs")
+    localized = helpers.localize_results(
+        results,
+        Path("/home/me/proj"),
+        Path("/radar_data/ab12cd34/contract"),
+    )
+    assert localized[0]["locations"] == [
+        "/home/me/proj/programs/thread/src/lib.rs:12:3-9"
+    ]
+
+
+def test_localize_falls_back_when_a_location_escapes_the_root():
+    """A location outside the root must not raise mid-report.
+
+    `relative_to` throws rather than returning None, and the findings are
+    already computed by this point — degrading to the old fixed-depth strip
+    beats losing the whole report.
+    """
+    results = _located("/radar_data/other/contract/src/lib.rs")
+    localized = helpers.localize_results(
+        results,
+        Path("/home/me/proj"),
+        Path("/radar_data/ab12cd34/contract"),
+    )
+    assert localized[0]["locations"] == ["/home/me/proj/contract/src/lib.rs:12:3-9"]
+
+
+def test_localize_without_a_root_keeps_the_original_behaviour():
+    """No root passed — an older caller — still gets the fixed-depth strip."""
+    results = _located("/radar_data/contract/src/lib.rs")
+    localized = helpers.localize_results(results, Path("/home/me/proj"))
+    assert localized[0]["locations"] == ["/home/me/proj/src/lib.rs:12:3-9"]
+
+
+def test_reports_are_written_under_the_run_directory(tmp_path):
+    """Two scans overlapping must not write to the same report path."""
+    written = {}
+
+    def capture(path, findings):
+        written["path"] = Path(path)
+
+    with mock.patch.object(helpers, "save_json_output", capture), \
+         mock.patch("builtins.open", mock.mock_open()):
+        with pytest.raises(SystemExit):
+            helpers.print_write_outputs(
+                [_finding("High")], {"sources": {"f": 1}}, False, None, "json",
+                None, False, "none", [], None, False,
+                output_root=tmp_path / "proj" / "run-1",
+            )
+
+    assert written["path"] == tmp_path / "proj" / "run-1" / "output.json"
