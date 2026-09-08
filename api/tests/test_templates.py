@@ -4,6 +4,7 @@ import pytest
 import yaml
 from utils.ast import generate_ast_for_rust_file
 from utils.dsl.dsl import inject_code_lines, process_template_outputs, wrapped_exec
+from utils.selection import ACCENTS_FOR_FRAMEWORK
 
 
 def normalize_template_name(name):
@@ -532,12 +533,25 @@ def run_template_on_ast(yaml_data, ast_file, language: str = "rust"):
     return result
 
 
-def run_template_on_rust_source(yaml_data, source_file: Path):
+def run_template_on_rust_sources(yaml_data, source_files):
+    """Run a rule over several sources parsed as one unit.
+
+    Upstream's mocks hold a single file each, so upstream only needs the
+    singular form below. This fork's scoping, detection and noise fixtures are
+    multi-file on purpose - a rule that reasons across sources cannot be
+    exercised by one - so they need the whole set in one AST.
+    """
     code = yaml_data["rule"]
-    ast_data = generate_ast_for_rust_file(source_file)["ast"]
+    ast_data = []
+    for source_file in source_files:
+        ast_data.extend(generate_ast_for_rust_file(source_file)["ast"])
     modified_code = inject_code_lines(code, [f"ast = parse_ast({ast_data}, language='rust').items()"])
     template_outputs = wrapped_exec(modified_code)
     return process_template_outputs(template_outputs, yaml_data)
+
+
+def run_template_on_rust_source(yaml_data, source_file: Path):
+    return run_template_on_rust_sources(yaml_data, [source_file])
 
 
 # Templates that cannot fire under the current architecture, with the reason.
@@ -856,11 +870,18 @@ def test_every_accented_template_is_selectable_on_its_own_mock():
     )
 
 
-# Frameworks `detect_language_from_path` can actually report. An accent outside
-# this set matches nothing, and `select()` then drops the rule from every scan
-# whose framework is known - silently, since a rule that is never selected looks
-# exactly like a rule that found nothing.
-SELECTABLE_ACCENTS = {"", "anchor", "stylus"}
+# Accents a scan can actually match. One outside this set matches nothing, and
+# the selector then drops the rule from every scan whose framework is known -
+# silently, since a rule that is never selected looks exactly like a rule that
+# found nothing.
+#
+# Derived from the selector rather than restated, because this fork treats an
+# accent as a floor rather than an exact match: an Anchor scan also runs
+# `solana` and `rust` rules. A hardcoded list drifts from that the moment a
+# framework is added, and it drifts in the direction that hides rules.
+SELECTABLE_ACCENTS = {""} | {
+    accent for accents in ACCENTS_FOR_FRAMEWORK.values() for accent in accents
+}
 
 
 def test_no_template_carries_an_unmatchable_accent():
