@@ -23,27 +23,6 @@ def extract_line_info(location):
     return location
 
 
-def to_mock_relative_path(location: str) -> str:
-    """Trim a detection location to the part starting at `tests/mocks/`.
-
-    Expectations used to be reassembled from the mock folder plus a hardcoded
-    `src/lib.rs`, which silently assumed every Rust mock was a bare crate with
-    exactly one source. A workspace-shaped mock has neither property, and a
-    multi-file variant can report findings in different files. The location the
-    rule produced already names the file it found, so read it from there.
-
-    Returns "" when the path is not under the mocks tree (Solidity project ASTs
-    use relative source-unit names), leaving the caller to reassemble.
-    """
-    path, _, line_info = location.rpartition(":")
-    path, _, col_info = path.rpartition(":")
-    marker = "tests/mocks/"
-    index = path.find(marker)
-    if index == -1:
-        return ""
-    return f"{path[index:]}:{col_info}:{line_info}"
-
-
 def get_mock_sol_filename(mock_folder: Path, kind: str) -> str:
     """Return the .sol filename (if any) inside mock_folder/kind/."""
     sol_files = list((mock_folder / kind).glob("*.sol"))
@@ -57,20 +36,20 @@ def get_mock_sol_filename(mock_folder: Path, kind: str) -> str:
 EXPECTED_DETECTIONS = {
     "Account Data Matching": {
         "bad": [
-            "tests/mocks/account_data_matching/bad/programs/account_data_matching/src/lib.rs:13:46-52"
+            "tests/mocks/account_data_matching/bad/src/lib.rs:13:46-52"
         ], 
         "good": []
     },
     "Account Precreation DoS": {
-        "bad": ["tests/mocks/account_precreation_dos/bad/programs/account_precreation_dos/src/lib.rs:9:12-27"],
+        "bad": ["tests/mocks/account_precreation_dos/bad/src/lib.rs:9:12-27"],
         "good": []
     },
     "Account Reinitialization": {
-        "bad": ["tests/mocks/account_reinitialization/bad/programs/account_reinitialization/src/lib.rs:11:12-22"],
+        "bad": ["tests/mocks/account_reinitialization/bad/src/lib.rs:11:12-22"],
         "good": []
     },
     "Arbitrary Cross-Program Invocation": {
-        "bad": ["tests/mocks/arbitrary_cross_program_invocation/bad/programs/arbitrary_cross_program_invocation/src/lib.rs:10:12-24"],
+        "bad": ["tests/mocks/arbitrary_cpi/bad/src/lib.rs:10:12-24"],
         "good": []
     },
     "Arbitrary External Call": {
@@ -86,11 +65,11 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Closing Accounts Insecurely": {
-        "bad": ["tests/mocks/closing_accounts_insecurely/bad/programs/closing_accounts_insecurely/src/lib.rs:11:64-74"],
+        "bad": ["tests/mocks/closing_accounts/bad/src/lib.rs:11:64-74"],
         "good": []
     },
     "Random Authority Generation": {
-        "bad": ["tests/mocks/cpi_authority_bypass/bad/programs/cpi_authority_bypass/src/lib.rs:10:33-43"],
+        "bad": ["tests/mocks/cpi_authority_bypass/bad/src/lib.rs:10:33-43"],
         "good": []
     },
     "Read-Only Reentrancy": {
@@ -98,11 +77,11 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
      "PDA Sharing": {
-        "bad": ["tests/mocks/pda_sharing/bad/programs/pda_sharing/src/lib.rs:23:16-24"],
+        "bad": ["tests/mocks/pda_sharing/bad/src/lib.rs:23:16-24"],
         "good": []
     },
     "Division Before Multiplication": {
-        "bad": ["tests/mocks/division_before_multiplication/bad/programs/division_before_multiplication/src/lib.rs:10:20-26"],
+        "bad": ["tests/mocks/division_before_multiplication/bad/src/lib.rs:10:20-26"],
         "good": []
     },
     "Exponential Calculation Complexity": {
@@ -125,7 +104,7 @@ EXPECTED_DETECTIONS = {
     },
     "Insecure Clock Randomness": {
         "bad": [
-            "tests/mocks/insecure_clock_randomness/bad/programs/insecure_clock_randomness/src/lib.rs:11:35-49"
+            "tests/mocks/insecure_clock_randomness/bad/src/lib.rs:11:35-49"
         ],
         "good": []
     },
@@ -144,37 +123,40 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Missing Freeze Authority Check": {
-        "bad": ["tests/mocks/missing_freeze_authority_check/bad/programs/missing_freeze_authority_check/src/lib.rs:28:9-13"],
+        "bad": ["tests/mocks/missing_freeze_authority_check/bad/src/lib.rs:28:9-13"],
         "good": []
     },
     "Missing has_one Constraint": {
-        "bad": ["tests/mocks/missing_has_one_constraint/bad/programs/missing_has_one_constraint/src/lib.rs:15:3-9"],
+        "bad": ["tests/mocks/missing_has_one_constraint/bad/src/lib.rs:15:3-9"],
         "good": []
     },
     "Missing Owner Check": {
-        "bad": ["tests/mocks/missing_owner_check/bad/programs/missing_owner_check/src/lib.rs:21:3-9"],
+        "bad": ["tests/mocks/missing_owner_check/bad/src/lib.rs:21:3-9"],
         "good": []
     },
     "Missing Rent Exemption Check": {
-        "bad": ["tests/mocks/missing_rent_exemption_check/bad/programs/missing_rent_exemption_check/src/lib.rs:11:38-52"],
+        "bad": ["tests/mocks/missing_rent_exemption_check/bad/src/lib.rs:11:38-52"],
         "good": []
     },
     "Missing Token Authority Constraint": {
-        "bad": ["tests/mocks/missing_token_authority_constraint/bad/programs/missing_token_authority_constraint/src/lib.rs:29:21-28"],
+        "bad": ["tests/mocks/missing_token_authority_constraint/bad/src/lib.rs:29:21-28"],
         "good": []
     },
     "Missing Token Mint Constraint": {
-        "bad": ["tests/mocks/missing_token_mint_constraint/bad/programs/missing_token_mint_constraint/src/lib.rs:25:21-28"],
+        "bad": ["tests/mocks/missing_token_mint_constraint/bad/src/lib.rs:25:21-28"],
         "good": []
     },
     "Missing Signer Check": {
-        "bad": ["tests/mocks/missing_signer_check/bad/programs/missing_signer_check/src/lib.rs:15:3-9"],
+        "bad": ["tests/mocks/missing_signer_check/bad/src/lib.rs:15:3-9"],
         "good": []
     },
     "Type Cosplay": {
-        "bad": ["tests/mocks/type_cosplay/bad/programs/type_cosplay/src/lib.rs:14:26-40"],
+        "bad": ["tests/mocks/type_cosplay/bad/src/lib.rs:14:26-40"],
         "good": []
     },
+    # v0.2.0 anchors the finding on the expression rather than on each operator,
+    # so the column moved along the same statement (`set` -> `get`): same line,
+    # same unchecked addition, reported once instead of three times.
     "Unchecked Arithmetics": {
         "bad": ["tests/mocks/unchecked_arithmetics/bad/src/lib.rs:16:39-42"],
         "good": []
@@ -349,11 +331,15 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Unchecked Close Target": {
-        "bad": ["tests/mocks/unchecked_close_target/bad/programs/unchecked_close_target/src/lib.rs:16:28-34"],
+        "bad": ["tests/mocks/unchecked_close_target/bad/src/lib.rs:16:28-34"],
         "good": []
     },
     "Unchecked CPI Program Invoke": {
-        "bad": ["tests/mocks/unchecked_cpi_program_invoke/bad/programs/unchecked_cpi_program_invoke/src/lib.rs:12:13-23"],
+        "bad": [# The rule reports the `program_id` field of the `Instruction` literal, and
+    # that node used to be one of the orphans the tree dropped - so the finding
+    # landed on the first reachable `program_id`, the fn parameter on line 10.
+    # With the node reachable it lands on the field itself.
+    "tests/mocks/unchecked_cpi_program_invoke/bad/src/lib.rs:12:13-23"],
         "good": []
     },
     "Unchecked Low-Level Call Return": {
@@ -361,23 +347,23 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Unchecked Token Account Owner": {
-        "bad": ["tests/mocks/unchecked_token_account_owner/bad/programs/unchecked_token_account_owner/src/lib.rs:29:15-22"],
+        "bad": ["tests/mocks/unchecked_token_account_owner/bad/src/lib.rs:29:15-22"],
         "good": []
     },
     "Anchor Spot Price Oracle": {
-        "bad": ["tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs:13:34-45"],
+        "bad": ["tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs:13:34-45"],
         "good": []
     },
     "Anchor Missing Min Output": {
-        "bad": ["tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs:9:53-60"],
+        "bad": ["tests/mocks/anchor_missing_min_output/bad/src/lib.rs:9:53-60"],
         "good": []
     },
     "Anchor Reward Overflow": {
-        "bad": ["tests/mocks/anchor_reward_overflow/bad/programs/anchor_reward_overflow/src/lib.rs:12:40-53"],
+        "bad": ["tests/mocks/anchor_reward_overflow/bad/src/lib.rs:12:40-53"],
         "good": []
     },
     "Decimal To U64 Without Sign Check": {
-        "bad": ["tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs:15:14-20"],
+        "bad": ["tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs:15:14-20"],
         "good": []
     },
     "Token Decimal Mismatch": {
@@ -389,29 +375,29 @@ EXPECTED_DETECTIONS = {
     },
     "Anchor Admin Without Timelock": {
         "bad": [
-            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:10:28-46",
-            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:15:28-36"
+            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:10:28-46",
+            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:15:28-36"
         ],
         "good": []
     },
     "Missing Transfer Amount Validation": {
-        "bad": ["tests/mocks/missing_transfer_amount_validation/bad/programs/missing_transfer_amount_validation/src/lib.rs:24:16-24"],
+        "bad": ["tests/mocks/missing_transfer_amount_validation/bad/src/lib.rs:24:16-24"],
         "good": []
     },
     "State Updated Before External Call": {
-        "bad": ["tests/mocks/state_updated_before_external_call/bad/src/lib.rs:18:22-28"],
+        "bad": ["tests/mocks/state_before_external_call/bad/src/lib.rs:18:22-28"],
         "good": []
     },
     "Init If Needed Reinitialization": {
-        "bad": ["tests/mocks/init_if_needed_reinitialization/bad/programs/init_if_needed_reinitialization/src/instructions/initialize.rs:9:15-29"],
+        "bad": ["tests/mocks/init_if_needed_reinitialization/bad/src/lib.rs:18:15-29"],
         "good": []
     },
     "Unconstrained UncheckedAccount": {
-        "bad": ["tests/mocks/unconstrained_uncheckedaccount/bad/programs/unconstrained_uncheckedaccount/src/lib.rs:18:17-33"],
+        "bad": ["tests/mocks/unconstrained_uncheckedaccount/bad/src/lib.rs:18:17-33"],
         "good": []
     },
     "Invoke Signed Unvalidated Seeds": {
-        "bad": ["tests/mocks/invoke_signed_unvalidated_seeds/bad/programs/invoke_signed_unvalidated_seeds/src/lib.rs:12:18-31"],
+        "bad": ["tests/mocks/invoke_signed_unvalidated_seeds/bad/src/lib.rs:12:18-31"],
         "good": []
     },
     "Stylus Missing Reentrancy Guard": {
@@ -419,7 +405,7 @@ EXPECTED_DETECTIONS = {
         "good": []
     },
     "Mint Decimals Scaling Ignored": {
-        "bad": ["tests/mocks/mint_decimals_scaling_ignored/bad/programs/mint_decimals_scaling_ignored/src/lib.rs:11:31-43"],
+        "bad": ["tests/mocks/mint_decimals_scaling_ignored/bad/src/lib.rs:11:31-43"],
         "good": []
     },
     "Chainlink L2 Sequencer Uptime Not Checked": {
@@ -546,44 +532,24 @@ def run_template_on_ast(yaml_data, ast_file, language: str = "rust"):
     return result
 
 
-def run_template_on_rust_sources(yaml_data, source_files):
-    """Run a rule over one AST built from every source in `source_files`.
-
-    A scan builds the AST for a whole crate and hands the rule all of it at
-    once, which is what lets a cross-file rule work: `ast` re-iterates, so a
-    first pass can collect declarations from one file and a second pass judge
-    uses of them in another. Parsing each file into its own AST - the shape
-    this helper replaced - makes that rule structurally unable to fire in the
-    harness while working fine in production, so the mock proves nothing.
-
-    Each item carries the path it was enriched from, so locations stay
-    per-file even though the parse is per-variant.
-    """
+def run_template_on_rust_source(yaml_data, source_file: Path):
     code = yaml_data["rule"]
-    ast_data = []
-    for source_file in source_files:
-        ast_data.extend(generate_ast_for_rust_file(source_file)["ast"])
+    ast_data = generate_ast_for_rust_file(source_file)["ast"]
     modified_code = inject_code_lines(code, [f"ast = parse_ast({ast_data}, language='rust').items()"])
     template_outputs = wrapped_exec(modified_code)
     return process_template_outputs(template_outputs, yaml_data)
 
 
-def run_template_on_rust_source(yaml_data, source_file: Path):
-    return run_template_on_rust_sources(yaml_data, [source_file])
-
-
 # Templates that cannot fire under the current architecture, with the reason.
 # Kept explicit rather than left silently green: a rule that can never report is
 # worse than no rule, because it reads as coverage the scanner does not have.
-ARCHITECTURALLY_UNDETECTABLE = {
-    "Missing Security Documentation": (
-        "keys on Rust doc comments, which reach syn as a synthesized `doc` "
-        "attribute. Source spans are resolved by searching the file text for the "
-        "identifier, and the string 'doc' never appears in the source, so the "
-        "node is dropped before the DSL sees it. Needs real parser spans "
-        "(see the span discussion in PR #23) or removal."
-    ),
-}
+# Templates that cannot fire under the current architecture, with the reason.
+# Empty: `missing_security_documentation` was the only entry and has been removed
+# rather than left permanently xfailed. A rule that can never report is worse
+# than no rule, because it reads as coverage the scanner does not have - which is
+# what this dict was written to say, so keeping an entry in it forever contradicts
+# its own comment.
+ARCHITECTURALLY_UNDETECTABLE = {}
 
 
 @pytest.mark.parametrize("template_data", get_template_test_data(), ids=lambda x: x["template_name"])
@@ -629,10 +595,8 @@ def test_template_accuracy(template_data):
     bad_source_file = template_data.get("bad_source_file", "src/lib.rs")
     detected_with_relative_paths = []
     for loc in bad_locations:
-        relative_path = to_mock_relative_path(loc)
-        if not relative_path:
-            line_info = extract_line_info(loc)
-            relative_path = f"tests/mocks/{template_data['mock_folder']}/bad/{bad_source_file}:{line_info}"
+        line_info = extract_line_info(loc)
+        relative_path = f"tests/mocks/{template_data['mock_folder']}/bad/{bad_source_file}:{line_info}"
         detected_with_relative_paths.append(relative_path)
     
     detected_set = set(detected_with_relative_paths)
@@ -648,6 +612,35 @@ def test_template_accuracy(template_data):
     
     assert expected_good_locations == [], \
         f"Expected good locations should be empty list, got {expected_good_locations}"
+
+
+def test_every_template_has_a_mock_pair_on_disk():
+    """Collection is silent: get_template_test_data appends nothing for a template
+    whose mock folder it cannot resolve, so the suite shrinks without a failure or
+    a skip. That is how rules have stayed broken while CI looked green (see the
+    name-drift fallback in get_template_test_data).
+
+    Asserted against the committed mock folders rather than the generated
+    ast.json, so this stays honest in jobs that have no Rust or solc toolchain
+    and therefore cannot produce fixtures."""
+    mocks_path = Path("tests/mocks").absolute()
+    orphans = []
+
+    for yaml_file in sorted(Path("builtin_templates").absolute().rglob("*.yaml")):
+        yaml_data = yaml.safe_load(open(yaml_file))
+        # Same resolution order as get_template_test_data: display name first,
+        # then the filename it drifted from.
+        by_name = mocks_path / normalize_template_name(yaml_data["name"])
+        by_stem = mocks_path / yaml_file.stem
+        if by_name.is_dir() or by_stem.is_dir():
+            continue
+        orphans.append(f"{yaml_file.name} ({yaml_data['name']})")
+
+    assert not orphans, (
+        f"{len(orphans)} template(s) resolve to no mock folder and are dropped from "
+        f"the accuracy suite silently: {', '.join(orphans)}. Add "
+        f"tests/mocks/<name>/{{bad,good}}/ for each."
+    )
 
 
 def test_all_templates_have_required_fields_in_order():
@@ -713,32 +706,32 @@ RUNTIME_RUST_TEMPLATES = [
     {
         "name": "Anchor Spot Price Oracle",
         "yaml_file": Path("builtin_templates/anchor_spot_price_oracle.yaml"),
-        "bad_source": Path("tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_spot_price_oracle/good/programs/anchor_spot_price_oracle/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/anchor_spot_price_oracle/bad/programs/anchor_spot_price_oracle/src/lib.rs:13:34-45"],
+        "bad_source": Path("tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_spot_price_oracle/good/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/anchor_spot_price_oracle/bad/src/lib.rs:13:34-45"],
     },
     {
         "name": "Anchor Missing Min Output",
         "yaml_file": Path("builtin_templates/anchor_missing_min_output.yaml"),
-        "bad_source": Path("tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_missing_min_output/good/programs/anchor_missing_min_output/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/anchor_missing_min_output/bad/programs/anchor_missing_min_output/src/lib.rs:9:53-60"],
+        "bad_source": Path("tests/mocks/anchor_missing_min_output/bad/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_missing_min_output/good/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/anchor_missing_min_output/bad/src/lib.rs:9:53-60"],
     },
     {
         "name": "Decimal To U64 Without Sign Check",
         "yaml_file": Path("builtin_templates/decimal_to_u64_without_sign_check.yaml"),
-        "bad_source": Path("tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs"),
-        "good_source": Path("tests/mocks/decimal_to_u64_without_sign_check/good/programs/decimal_to_u64_without_sign_check/src/lib.rs"),
-        "expected_bad_locations": ["tests/mocks/decimal_to_u64_without_sign_check/bad/programs/decimal_to_u64_without_sign_check/src/lib.rs:15:14-20"],
+        "bad_source": Path("tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs"),
+        "good_source": Path("tests/mocks/decimal_to_u64_without_sign_check/good/src/lib.rs"),
+        "expected_bad_locations": ["tests/mocks/decimal_to_u64_without_sign_check/bad/src/lib.rs:15:14-20"],
     },
     {
         "name": "Anchor Admin Without Timelock",
         "yaml_file": Path("builtin_templates/anchor_admin_without_timelock.yaml"),
-        "bad_source": Path("tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs"),
-        "good_source": Path("tests/mocks/anchor_admin_without_timelock/good/programs/anchor_admin_without_timelock/src/lib.rs"),
+        "bad_source": Path("tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs"),
+        "good_source": Path("tests/mocks/anchor_admin_without_timelock/good/src/lib.rs"),
         "expected_bad_locations": [
-            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:10:28-46",
-            "tests/mocks/anchor_admin_without_timelock/bad/programs/anchor_admin_without_timelock/src/lib.rs:15:28-36",
+            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:10:28-46",
+            "tests/mocks/anchor_admin_without_timelock/bad/src/lib.rs:15:28-36",
         ],
     },
 ]
@@ -758,3 +751,172 @@ def test_runtime_rust_template_accuracy(template_data):
 
     assert bad_locations == set(template_data["expected_bad_locations"])
     assert good_locations == []
+
+
+@pytest.mark.active_runtime
+def test_every_rust_mock_has_a_generated_fixture():
+    """The accuracy suite must not shrink to whatever the toolchain happened to build.
+
+    `get_template_test_data` only yields a case when both `ast.json` fixtures
+    exist, and a job without `rust_syn` produces none of the Rust ones - so
+    every Rust accuracy test vanishes from collection. Vanishing is not
+    skipping: pytest reports no skip, the job is green, and two drifted
+    expectations sat that way.
+
+    Marked `active_runtime`, so it asserts exactly where it can be satisfied:
+    in the job that builds the parser. A job that cannot build Rust fixtures
+    deselects this and must scope its generation with `--only solidity` rather
+    than ignore the generator's exit code.
+    """
+    mocks_path = Path("tests/mocks").absolute()
+    missing = []
+    for variant_dir in sorted(mocks_path.glob("*/*")):
+        if variant_dir.name not in ("bad", "good"):
+            continue
+        if not list(variant_dir.rglob("*.rs")):
+            continue
+        if not (variant_dir / "ast.json").exists():
+            missing.append(str(variant_dir.relative_to(mocks_path)))
+
+    assert not missing, (
+        f"{len(missing)} Rust mock variant(s) have no generated ast.json, so their "
+        f"accuracy tests are not collected at all: {', '.join(missing[:10])}"
+        + (" ..." if len(missing) > 10 else "")
+        + ". Run scripts/generate_fixtures.py."
+    )
+
+
+@pytest.mark.active_runtime
+def test_every_accented_template_is_selectable_on_its_own_mock():
+    """A rule must be one a real scan of its own mock would actually run.
+
+    `test_template_accuracy` executes the rule directly against a prebuilt AST,
+    which skips template selection entirely. A rule can therefore pass its mock
+    while being unselectable for the kind of project that mock represents: an
+    `accent: anchor` rule whose mock declares `stylus-sdk` is dropped by the
+    accent filter before it ever runs, and nothing in the suite notices.
+
+    Passing on a fixture the pipeline would never hand you is not evidence the
+    rule works. Either the accent is wrong for what the rule detects, or the
+    mock is written in the wrong framework - both are worth being told about.
+    """
+    import os
+    import sys as _sys
+
+    os.environ.setdefault("DJANGO_PORT", "8000")
+    os.environ.setdefault("DJANGO_HOST", "api")
+    os.environ.setdefault("DJANGO_HOST_LOCAL", "localhost")
+    # `controller.api` is imported as a package, so the directory *above*
+    # controller/ has to be importable - the same two entries corpus2_regression
+    # adds. In the image that is `/`; from a dev checkout it is the repo root.
+    repo_root = Path("..").resolve()
+    for candidate in (str(repo_root), str(repo_root / "controller")):
+        if candidate not in _sys.path:
+            _sys.path.insert(0, candidate)
+    try:
+        from controller.api import detect_language_from_path
+    except ImportError:  # pragma: no cover - controller not importable here
+        pytest.skip("controller not importable")
+
+    # Recorded rather than hidden, the same way ARCHITECTURALLY_UNDETECTABLE is.
+    # Both are language-level arithmetic rules carrying `accent: anchor` while
+    # their mocks are Stylus crates, so a real scan of either mock selects
+    # neither rule. Widening them to `accent: ""` would make them run on
+    # Arbitrum Stylus contracts as well, which is a decision about what the
+    # rules are for - and one no corpus here can settle, since none of the
+    # production repositories measured contain Stylus code. Left to the
+    # maintainer; listed so it is a known debt and not a silent one, and so any
+    # *new* mismatch still fails.
+    # Empty, and should stay that way: `division_before_multiplication` was the
+    # only entry and its accent has since been opened to every framework, which
+    # is what it should have been - the rule is about integer arithmetic, not
+    # about Anchor. An entry here means a rule a real scan of its own mock would
+    # never select, which is a rule passing on a fixture the pipeline would never
+    # hand it.
+    KNOWN_ACCENT_MISMATCH = set()
+
+    mismatched = []
+    for template_path in sorted(Path("builtin_templates").absolute().glob("*.yaml")):
+        if template_path.stem in KNOWN_ACCENT_MISMATCH:
+            continue
+        data = yaml.safe_load(template_path.read_text())
+        accent = (data or {}).get("accent") or ""
+        if not accent:
+            continue  # applies to every framework; nothing to disagree with
+        mock = Path("tests/mocks").absolute() / template_path.stem / "bad"
+        if not mock.is_dir() or not list(mock.rglob("*.rs")):
+            continue
+        framework = detect_language_from_path(mock)[1]
+        if framework != "unknown" and framework != accent:
+            mismatched.append(f"{template_path.stem}: accent={accent}, mock detects {framework}")
+
+    assert not mismatched, (
+        "template(s) that a real scan of their own mock would never select:\n  "
+        + "\n  ".join(mismatched)
+    )
+
+
+# Frameworks `detect_language_from_path` can actually report. An accent outside
+# this set matches nothing, and `select()` then drops the rule from every scan
+# whose framework is known - silently, since a rule that is never selected looks
+# exactly like a rule that found nothing.
+SELECTABLE_ACCENTS = {"", "anchor", "stylus"}
+
+
+def test_no_template_carries_an_unmatchable_accent():
+    """An accent the selector can never match disables the rule, quietly.
+
+    `select()` keeps a Rust template when its accent is empty, when the
+    framework is unknown, or when accent == framework. The detector only ever
+    reports `anchor`, `stylus` or `unknown`, so an accent of anything else -
+    `rust`, say, which reads as "any Rust program" - means the rule runs on
+    projects with *no* detected framework and is dropped from every Anchor and
+    Stylus scan. "Applies to all Rust" is spelled with an empty accent.
+
+    Not marked `active_runtime`: it reads YAML only, so the cheapest job catches
+    it.
+    """
+    offenders = []
+    for template_path in sorted(Path("builtin_templates").absolute().glob("*.yaml")):
+        data = yaml.safe_load(template_path.read_text())
+        if not data:
+            continue
+        accent = data.get("accent")
+        if accent is None:
+            continue  # the required-fields test owns absent keys
+        if accent not in SELECTABLE_ACCENTS:
+            offenders.append(f"{template_path.name}: accent={accent!r}")
+
+    assert not offenders, (
+        "accent value(s) no scan can match, so the rule is silently dropped:\n  "
+        + "\n  ".join(offenders)
+        + f"\nUse one of {sorted(SELECTABLE_ACCENTS)} (empty means every framework)."
+    )
+
+
+def test_no_template_resolves_to_two_mock_folders():
+    """One template, one mock folder.
+
+    `get_template_test_data` resolves the display name first and falls back to
+    the file stem, while `check_scoping` resolves the stem only. When both
+    folders existed the two gates tested *different copies of the same mock*:
+    `arbitrary_cpi/` and `arbitrary_cross_program_invocation/` held byte-identical
+    sources, and editing either left the other silently passing against a stale
+    copy. Reads YAML and the filesystem only, so the cheapest job catches it.
+    """
+    mocks_path = Path("tests/mocks").absolute()
+    duplicated = []
+
+    for template_path in sorted(Path("builtin_templates").absolute().glob("*.yaml")):
+        data = yaml.safe_load(template_path.read_text())
+        if not data or "name" not in data:
+            continue
+        by_name = mocks_path / normalize_template_name(data["name"])
+        by_stem = mocks_path / template_path.stem
+        if by_name != by_stem and by_name.is_dir() and by_stem.is_dir():
+            duplicated.append(f"{template_path.name}: {by_name.name} and {by_stem.name}")
+
+    assert not duplicated, (
+        "template(s) resolving to two mock folders, so different gates test "
+        "different copies:\n  " + "\n  ".join(duplicated)
+    )

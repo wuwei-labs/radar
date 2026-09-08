@@ -1,243 +1,283 @@
-"""Score the rules against ScannerTruth's corpus-2 pack, and fail on a regression.
+"""Out-of-sample regression run against the ScannerTruth corpus-2 pack.
 
-The fixture gates in `pytest.yml` are ours: we wrote the vulnerable files, so
-they measure what we thought to check. This measures the rules against
-seventeen real-world Solana bugs someone else chose, packaged with their own
-mapping and their own scorer, and it is the only number here that is
-out-of-sample.
+The two fixture gates (`test_detection_fixtures.py`, `test_noise_fixtures.py`) are
+written by us, so they only ever measure what we already thought to check. This runs
+the rules over seventeen real-world Solana bugs packaged by the benchmark author, each
+a vulnerable/fixed pair with a pre-registered rule mapping and the fix location, and
+scores them with the pack's own scorer rather than one of ours.
 
-Not a merge gate. The mapping is upstream's, over public crates, and a `missed`
-there is a coverage limit rather than a defect - most of the misses are classes
-radar has no rule for at all. What *is* a defect is going backwards, so this
-compares against `corpus2_baseline.json` and fails only when a case scores worse
-than it did.
+It is deliberately not a merge gate: the cases are someone else's mapping over public
+crates, and a `missed` here is a coverage limit rather than a defect. It fails only on
+a *regression* against the committed baseline - a case that scored better before.
 
-    python tests/corpus2_regression.py                  # score, compare, exit 1 on regression
-    python tests/corpus2_regression.py --write-baseline # re-record after an intended change
-    SCANNERTRUTH_DIR=/path/to/checkout python tests/corpus2_regression.py
+Lowering a baseline entry needs a reason, and only one reason is legitimate: the rule
+was firing on the fixed variant too, so what it lost was never a detection. This
+scorer reads only the vulnerable side, so it ranks `unlocated` above `missed` even
+when the `unlocated` hit was carpet-bombing - `measure.py`'s paired `real` metric is
+what tells the two apart. Any other downgrade is a real regression and must be fixed
+rather than recorded.
 
-Scanning is done in-process rather than through the radar CLI: the pack's
-`run.sh` drives Docker, which CI does not have, and a container per variant is
-34 cold starts to compute something the DSL can answer directly. The output is
-written in the exact shape `check.py` reads, and the scoring is then upstream's
-code, unmodified.
+Downgraded on 2026-09-06, both under that reason and both for Account Data Matching
+v0.3.0: `metaplex-token-metadata` fired once on the bug and once on its fix, and
+`token-2022-confidential-approve-mint` fired eighteen times on each. Neither was a
+detection before and neither is a loss now; `real` stayed 1/17 across the change.
+
+Cases already read while debugging, which are no longer out-of-sample: solend-owner-checks,
+metaplex-candy-machine, anchor-account-reload-owner, solido-deposit-reserve-account,
+spl-stake-pool-mint-decimals, spl-stake-pool-fee-rounding, spl-token-lending-rounding,
+squads-recursive-execute. A pass on one of those is in-sample and should be reported as such.
+
+Usage:
+    python tests/corpus2_regression.py                 # clone the pack, run, compare
+    python tests/corpus2_regression.py --pack DIR      # use an existing checkout
+    python tests/corpus2_regression.py --update-baseline
 """
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-API_ROOT = Path(__file__).resolve().parent.parent
-REPO_ROOT = API_ROOT.parent
-sys.path.insert(0, str(API_ROOT))
-sys.path.insert(0, str(REPO_ROOT))
+import yaml
 
-import yaml  # noqa: E402
+API = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(API))
+sys.path.insert(0, str(API.parent))
+sys.path.insert(0, str(API.parent / "controller"))
 
-from utils.ast import generate_ast_for_rust_file  # noqa: E402
+# Detection lives in its own module here rather than inside `controller.api`, so
+# importing it costs nothing: no Django settings, no env vars, nothing that talks
+# to the API. This run still selects templates by exactly the rule the real
+# pipeline uses rather than a copy that can drift from it.
+from controller.detection import detect_language_from_path  # noqa: E402
+from utils.ast import generate_program_ast_for_folder  # noqa: E402
 from utils.dsl.dsl import (  # noqa: E402
     inject_code_lines,
     process_template_outputs,
     wrapped_exec,
 )
-from utils.selection import template_applies  # noqa: E402
-from controller.detection import detect_language_from_path  # noqa: E402
 
-# Pinned by full commit SHA: the scorer and the mapping are the measurement, so
-# they cannot be allowed to drift underneath a baseline recorded against them.
-SCANNERTRUTH_REPO = "https://github.com/halobartku/scannertruth.git"
-SCANNERTRUTH_SHA = "26f5e5a6fdf8d380a646db3b786d61bba9b1cb32"
+PACK_REPO = "https://github.com/halobartku/scannertruth.git"
+# Pinned: the pack is upstream's to change, and an unpinned clone would turn their
+# edits into our CI failures.
+PACK_COMMIT = "0c48dd888854e5545ff6babef2c68f31b3a2f35f"
+PACK_SUBDIR = "regression-pack-radar"
 
 BASELINE = Path(__file__).resolve().parent / "corpus2_baseline.json"
-TEMPLATES = API_ROOT / "builtin_templates"
+VARIANTS = ("insecure", "secure")
 
-# Better to worse. `no-rule` sits level with `missed` deliberately: it means the
-# mapping names no rule for the class, so no change to our rules can move it,
-# and treating it as a distinct rank would make an upstream mapping edit look
-# like our regression.
-VERDICT_RANK = {"detected": 3, "unlocated": 2, "missed": 1, "no-rule": 1, "not-run": 0}
+# Worse verdicts sort lower. `no-rule` sits under `missed` on purpose: a case that
+# drops from `missed` to `no-rule` means a mapped rule name stopped existing, which is
+# a rename or deletion we want to hear about.
+RANK = {"not-run": -1, "no-rule": 0, "missed": 1, "unlocated": 2, "detected": 3}
 
 
-def fetch_pack() -> Path:
-    """The pack, from a local checkout if given, else cloned at the pinned SHA."""
-    local = os.environ.get("SCANNERTRUTH_DIR")
-    if local:
-        pack = Path(local) / "regression-pack-radar"
-        if not pack.is_dir():
-            sys.exit(f"[e] No regression-pack-radar under SCANNERTRUTH_DIR={local}")
-        print(f"[i] Using local pack at {pack}")
-        return pack
-
-    checkout = Path(tempfile.mkdtemp(prefix="scannertruth-")) / "scannertruth"
-    print(f"[i] Cloning {SCANNERTRUTH_REPO} at {SCANNERTRUTH_SHA[:12]}")
+def clone_pack(dest: Path) -> Path:
+    subprocess.run(["git", "init", "-q", str(dest)], check=True)
+    subprocess.run(["git", "-C", str(dest), "remote", "add", "origin", PACK_REPO], check=True)
     subprocess.run(
-        ["git", "clone", "--quiet", SCANNERTRUTH_REPO, str(checkout)], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(checkout), "checkout", "--quiet", SCANNERTRUTH_SHA], check=True
-    )
-    return checkout / "regression-pack-radar"
-
-
-def rules_for(variant_dir: Path):
-    """The templates a real scan of this variant would run.
-
-    Selection is not cosmetic here. The pack's synthetic manifests declare
-    `solana-program`, so every case detects as native Solana and the seven
-    Anchor-accented rules do not apply. Running them anyway would score rules
-    against sources radar would never point them at.
-    """
-    language, framework, protocols = detect_language_from_path(variant_dir)
-    selected = []
-    for path in sorted(TEMPLATES.glob("*.yaml")):
-        data = yaml.safe_load(path.read_text())
-        if not isinstance(data, dict) or data.get("language", "rust") != "rust":
-            continue
-        if not template_applies(data, language, framework, protocols):
-            continue
-        selected.append(data)
-    return selected
-
-
-def scan(variant_dir: Path):
-    """Findings for one variant, in the shape check.py reads."""
-    sources = sorted(variant_dir.rglob("*.rs"))
-    if not sources:
-        return [], 0
-
-    items = []
-    for source in sources:
-        items.extend(generate_ast_for_rust_file(source)["ast"])
-
-    findings = []
-    for data in rules_for(variant_dir):
-        code = inject_code_lines(
-            data["rule"], [f"ast = parse_ast({items}, language='rust').items()"]
-        )
-        try:
-            result = process_template_outputs(wrapped_exec(code), data)
-        except Exception as exc:
-            # A rule that raises is a defect, not a quiet zero - the whole point
-            # of narrowing the sandbox's exception handling. Surface it here too
-            # rather than scoring it as "found nothing".
-            print(f"[e] {data['name']} raised on {variant_dir}: {type(exc).__name__}: {exc}")
-            continue
-        locations = result.get("locations") or []
-        if locations:
-            findings.append({"name": data["name"], "locations": locations})
-    return findings, len(sources)
-
-
-def write_results(pack: Path, results_dir: Path):
-    cases = json.loads((pack / "manifest.json").read_text())["cases"]
-    for case in cases:
-        name = case["name"]
-        for variant in ("insecure", "secure"):
-            variant_dir = pack / "cases" / name / variant
-            if not variant_dir.is_dir():
-                continue
-            findings, scanned = scan(variant_dir)
-            leaf = results_dir / f"{name}.{variant}"
-            leaf.mkdir(parents=True, exist_ok=True)
-            (leaf / "radar.json").write_text(json.dumps(findings))
-            # check.py treats a missing radar.json as a real zero only when the
-            # log says a scan happened, so this line is evidence, not decoration.
-            (leaf / "stdout.log").write_text(f"[i] Scanned {scanned} files\n")
-        print(f"[i] scored {name}")
-
-
-def score(pack: Path, results_dir: Path) -> dict:
-    out = results_dir / "verdicts.json"
-    subprocess.run(
-        [sys.executable, "check.py", "--results", str(results_dir), "--json", str(out)],
-        cwd=str(pack),
+        ["git", "-C", str(dest), "fetch", "-q", "--depth", "1", "origin", PACK_COMMIT],
         check=True,
     )
-    return json.loads(out.read_text())
+    subprocess.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"], check=True)
+    return dest / PACK_SUBDIR
 
 
-def compare(current: dict, baseline: dict) -> int:
-    rows = {row["id"]: row for row in current["cases"]}
-    recorded = baseline.get("cases", {})
+def load_templates():
+    out = []
+    for path in sorted((API / "builtin_templates").glob("*.yaml")):
+        data = yaml.safe_load(open(path))
+        if data:
+            out.append(data)
+    return out
 
-    regressions = []
-    print(f"\n{'case':38} {'verdict':11} {'was':11} {'on-fixed':>8} {'was':>5}")
-    for case_id in sorted(rows):
-        row = rows[case_id]
-        was = recorded.get(case_id)
-        verdict, noise = row["verdict"], row.get("fires_on_fixed") or 0
-        if was is None:
-            print(f"{case_id:38} {verdict:11} {'(new)':11} {noise:>8} {'-':>5}")
+
+def select(templates, language, framework):
+    """The template filter from api/views.py, applied to one variant directory."""
+    chosen = []
+    for data in templates:
+        if data.get("language", "rust") != language:
             continue
-        old_verdict, old_noise = was["verdict"], was.get("fires_on_fixed") or 0
-        print(f"{case_id:38} {verdict:11} {old_verdict:11} {noise:>8} {old_noise:>5}")
+        accent = data.get("accent", "")
+        if language == "rust" and accent and framework != "unknown" and accent != framework:
+            continue
+        chosen.append(data)
+    return chosen
 
-        if VERDICT_RANK.get(verdict, 0) < VERDICT_RANK.get(old_verdict, 0):
-            regressions.append(f"{case_id}: {old_verdict} -> {verdict}")
-        if noise > old_noise:
-            regressions.append(
-                f"{case_id}: findings on fixed code {old_noise} -> {noise}"
+
+def scan_variant(vdir: Path, templates):
+    # Three values here, not two: this fork's detection also reports the
+    # protocols a source integrates with. Unused by the corpus scorer, whose
+    # cases are public crates with no protocol to match.
+    _, framework, _protocols = detect_language_from_path(vdir)
+    # Language the way `views.py` decides it, so a crate with no Cargo.toml is
+    # still scanned as Rust rather than selecting no templates at all.
+    language = "solidity" if next(vdir.rglob("*.sol"), None) else "rust"
+    ast_blob = generate_program_ast_for_folder(vdir)
+    findings, errors = [], []
+    for data in select(templates, language, framework):
+        try:
+            code = inject_code_lines(
+                data["rule"], [f"ast = parse_ast({ast_blob}, language='rust').items()"]
             )
+            result = process_template_outputs(wrapped_exec(code), data)
+            if result and result.get("locations"):
+                findings.append(result)
+        except Exception as exc:
+            # A template that raises reports nothing. It used to do so silently
+            # here, which meant a rule that broke and a rule that found nothing
+            # produced the same corpus verdict - the exact confusion `RuleSkip`
+            # was introduced to end. Record it and let the run say so.
+            errors.append(f"{data['name']}: {type(exc).__name__}: {exc}")
+    return findings, len(ast_blob["sources"]), errors
 
-    for case_id in sorted(set(recorded) - set(rows)):
-        regressions.append(f"{case_id}: present in the baseline, absent from this run")
 
-    print("\n" + "  ".join(f"{k}={v}" for k, v in sorted(current["tally"].items())))
-    total = sum(r.get("fires_on_fixed") or 0 for r in current["cases"])
-    print(f"findings on fixed variants (upper bound on noise): {total}")
+# Rules that raised during the run. A verdict computed while errors were
+# invisible would read "this rule does not detect this bug" when the truth is
+# "this rule crashed", and those call for opposite fixes.
+rule_errors = []
 
-    if regressions:
-        print("\n[e] corpus-2 regression:")
-        for line in regressions:
-            print(f"      {line}")
-        print(
-            "\n    If the change was intended, re-record with --write-baseline "
-            "and say why in the commit."
-        )
-        return 1
-    print("\n[i] No case scored worse than the baseline.")
-    return 0
+
+def run(pack: Path, templates):
+    cases = [c["name"] for c in json.load(open(pack / "manifest.json"))["cases"]]
+    results = pack / "results"
+    for case in cases:
+        for variant in VARIANTS:
+            vdir = pack / "cases" / case / variant
+            if not vdir.is_dir():
+                continue
+            findings, n_files, errors = scan_variant(vdir, templates)
+            rule_errors.extend(f"{case}.{variant}: {e}" for e in errors)
+            leaf = results / f"{case}.{variant}"
+            leaf.mkdir(parents=True, exist_ok=True)
+            json.dump(findings, open(leaf / "radar.json", "w"), indent=1)
+            # The pack's loader treats a missing radar.json as evidence of nothing
+            # only when stdout says a scan happened.
+            (leaf / "stdout.log").write_text(f"Scanned {n_files} files\n")
+            suffix = f" errors={len(errors)}" if errors else ""
+            print(f"  {case}.{variant:9} rules_fired={len(findings)}{suffix}", flush=True)
+    return results
+
+
+LOCAL_MAPPING = Path(__file__).resolve().parent / "corpus2_mapping_local.json"
+
+
+def _shadow_pack(pack: Path, tmp: Path) -> Path:
+    """A view of the pack whose `mapping.json` also knows our newer rules.
+
+    `check.py` reads `mapping.json` from its own directory and takes no override,
+    and the pack's copy predates every rule added since it was written - so those
+    classes score `no-rule` forever and the regression under-reports coverage
+    radar actually has. Everything is symlinked except the mapping, so the real
+    checkout is never written to and the scorer still runs unmodified.
+    """
+    if not LOCAL_MAPPING.is_file():
+        return pack
+
+    shadow = tmp / "pack"
+    shadow.mkdir(parents=True, exist_ok=True)
+    for entry in pack.iterdir():
+        if entry.name != "mapping.json":
+            link = shadow / entry.name
+            if not link.exists():
+                link.symlink_to(entry)
+
+    merged = json.load(open(pack / "mapping.json"))
+    additions = json.load(open(LOCAL_MAPPING)).get("map", {})
+    # The pack's own entries win: this file adds coverage, it never reinterprets
+    # a class the benchmark author has already mapped.
+    for klass, rules in additions.items():
+        merged["map"].setdefault(klass, rules)
+    (shadow / "mapping.json").write_text(json.dumps(merged, indent=1))
+    return shadow
+
+
+def score(pack: Path, results: Path):
+    """Verdicts come from the pack's own scorer, run unmodified."""
+    out = pack / "verdicts.json"
+    subprocess.run(
+        [sys.executable, "check.py", "--results", str(results), "--json", str(out)],
+        cwd=pack,
+        check=True,
+    )
+    return {r["id"]: r["verdict"] for r in json.load(open(out))["cases"]}
+
+
+def compare(got, baseline):
+    regressions, improvements = [], []
+    for case, want in sorted(baseline.items()):
+        have = got.get(case, "not-run")
+        if have == want:
+            continue
+        (regressions if RANK[have] < RANK[want] else improvements).append((case, want, have))
+    for case in sorted(set(got) - set(baseline)):
+        improvements.append((case, "(new case)", got[case]))
+    return regressions, improvements
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--write-baseline", action="store_true")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pack", help="existing scannertruth checkout or pack directory")
+    ap.add_argument("--update-baseline", action="store_true")
+    args = ap.parse_args()
 
-    pack = fetch_pack()
-    results_dir = Path(tempfile.mkdtemp(prefix="corpus2-results-"))
-    write_results(pack, results_dir)
-    current = score(pack, results_dir)
+    with tempfile.TemporaryDirectory() as tmp:
+        if args.pack:
+            pack = Path(args.pack)
+            if (pack / PACK_SUBDIR).is_dir():
+                pack = pack / PACK_SUBDIR
+        else:
+            print(f"cloning pack at {PACK_COMMIT[:9]}", flush=True)
+            pack = clone_pack(Path(tmp) / "scannertruth")
 
-    if args.write_baseline:
-        BASELINE.write_text(
-            json.dumps(
-                {
-                    "scannertruth_sha": SCANNERTRUTH_SHA,
-                    "tally": current["tally"],
-                    "cases": {
-                        row["id"]: {
-                            "verdict": row["verdict"],
-                            "fires_on_fixed": row.get("fires_on_fixed") or 0,
-                        }
-                        for row in current["cases"]
-                    },
-                },
-                indent=1,
-            )
-            + "\n"
-        )
-        print(f"[i] Baseline written to {BASELINE}")
+        templates = load_templates()
+        print(f"{len(templates)} templates, pack at {pack}", flush=True)
+        results = run(pack, templates)
+        got = score(_shadow_pack(pack, Path(tmp)), results)
+
+    if args.update_baseline:
+        BASELINE.write_text(json.dumps(got, indent=1, sort_keys=True) + "\n")
+        print(f"\nbaseline written: {BASELINE}")
         return 0
 
-    if not BASELINE.exists():
-        sys.exit(f"[e] No baseline at {BASELINE}; record one with --write-baseline")
-    return compare(current, json.loads(BASELINE.read_text()))
+    baseline = json.loads(BASELINE.read_text())
+    regressions, improvements = compare(got, baseline)
+
+    tally = {}
+    for verdict in got.values():
+        tally[verdict] = tally.get(verdict, 0) + 1
+    print("\n" + "  ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+
+    if rule_errors:
+        # Printed before the verdicts, because a verdict computed while a rule
+        # was raising is not the verdict it looks like: "missed" here can mean
+        # "crashed", and those need opposite fixes.
+        print(f"\n{len(rule_errors)} rule error(s) during the run - verdicts for "
+              f"these rules are not measurements of detection:")
+        for entry in sorted(set(rule_errors)):
+            print(f"  {entry}")
+
+    for case, want, have in improvements:
+        print(f"IMPROVED   {case}: {want} -> {have}")
+    for case, want, have in regressions:
+        print(f"REGRESSED  {case}: {want} -> {have}")
+
+    if regressions:
+        print(f"\n{len(regressions)} case(s) scored worse than the baseline.")
+        return 1
+    if rule_errors:
+        print(f"\n{len(set(rule_errors))} rule(s) raised. No verdict regressed, but "
+              f"a raising rule reports nothing, so the score understates nothing "
+              f"and overstates the rules' health.")
+        return 1
+    if improvements:
+        print("\nNo regressions. Re-run with --update-baseline to record the gains.")
+    else:
+        print("\nNo change from baseline.")
+    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

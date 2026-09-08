@@ -23,9 +23,9 @@ usage() {
     echo "  -f, --fail-on         Min severity that makes radar exit 1 for CI gating: critical|high|medium|low|none                 (optional) (default - low, i.e. any finding; errors always exit 2)"
     echo "  -b, --baseline        Path to a baseline file; findings it lists are not reported or gated                     (optional)"
     echo "      --write-baseline  Snapshot current findings to the --baseline path instead of reporting/gating             (optional)"
+    echo "      --include-tests   Scan test code too (tests/ dirs, test-named files, #[cfg(test)] items); excluded by default (optional)"
     echo "  -o, --output          Results output file path (output type controlled by extension e.g. .json/.md/.sarif)     (optional) (default - current directory)"
     echo "  -a, --ast             Additionally output the scanned contract's parsed AST                                    (optional)"
-    echo "      --include-tests   Scan test code too (tests/ dirs, test-named files, #[cfg(test)] / #[test] items)         (optional) (default - tests are skipped)"
     echo "  -d, --dev             Use development docker-compose file for local builds and enable debug output             (optional)"
     echo "  -ss, --store-sarif    Store and accumulate SARIF results from previous runs                                    (optional) (default - clean slate)"
     echo "  -u, --update          Check for and pull latest Docker images before running                                   (optional)"
@@ -48,6 +48,31 @@ check_docker() {
 
     echo "[e] Docker was not available after $retries attempts. Please ensure Docker is installed and running. If further problems arise, consider restarting the Docker service."
     exit 1
+}
+
+# Bring the stack up, keeping compose's output so a failure can be reported. This runs
+# under `set -e`, where sending compose to /dev/null turned any startup problem - a
+# taken port, a missing image, an unhealthy dependency - into a bare exit 1 with
+# nothing on screen but the preceding progress line.
+# Copy a result artefact out of the container, reporting what actually happened.
+# docker cp's failure was discarded while the success line printed regardless, so a
+# scan that produced no file still claimed to have written one.
+copy_out() {
+    if docker cp "radar-api:$1" "$2" >/dev/null 2>&1; then
+        echo "[i] Results written to $2"
+    else
+        echo "[w] No results file was produced at $2"
+    fi
+}
+
+compose_up() {
+    local compose_output
+    if ! compose_output=$(docker compose -f "$compose_file" up -d --quiet-pull "$@" 2>&1); then
+        echo "[e] Failed to start radar containers:"
+        echo "$compose_output" | sed 's/^/    /'
+        return 1
+    fi
+    return 0
 }
 
 
@@ -93,7 +118,7 @@ handle_update_command() {
     
     echo "[i] Restarting containers with updated images..."
     docker compose -f "$compose_file" down > /dev/null 2>&1
-    docker compose -f "$compose_file" up -d --quiet-pull > /dev/null 2>&1
+    compose_up
     
     cd "$INITIAL_DIR"
     echo "[i] Radar updated successfully!"
@@ -123,7 +148,7 @@ handle_info_command() {
     fi
     
     # Ensure containers are running
-    docker compose -f "$compose_file" up -d --quiet-pull > /dev/null 2>&1
+    compose_up
     
     # Wait for containers to be ready
     sleep 2
@@ -228,14 +253,25 @@ ignore_severities=""
 output_directory="$INITIAL_DIR"
 generate_ast=false
 shutdown_containers=false
+include_tests=false
 development_mode=false
 store_sarif=false
 check_update=false
-include_tests=false
+
+# How old an image has to be before the header says so. Long enough not to nag,
+# short enough to catch a cache that has quietly gone stale.
+STALE_IMAGE_DAYS=7
 
 # Check if first argument is a command
 command=""
-if [[ "$1" == "update" ]]; then
+if [[ $# -eq 0 ]]; then
+    # No arguments at all. Without this the script falls through every branch
+    # below - `-n "$1"` fails on an empty first argument, so the unknown-command
+    # case does not catch it either - and lands in the environment setup further
+    # down, where a first-time user is told the install script is missing. Typing
+    # the bare command should print help, not an install error.
+    usage
+elif [[ "$1" == "update" ]]; then
     command="update"
     shift
 elif [[ "$1" == "info" ]]; then
@@ -334,6 +370,47 @@ if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
     arm_specific_flag="--platform linux/amd64"
 fi
 
+print_version() {
+    # Which build is actually about to run. A cached image keeps working
+    # silently long after main has moved, and a scan from a stale one is
+    # indistinguishable from a current one - so the commit goes in the header,
+    # where it also ends up in any pasted bug report.
+    #
+    # Read from the OCI labels the publish workflow already sets, so this needs
+    # no build change. Deliberately no registry call: checking for a newer
+    # digest would put a network round trip, an offline failure mode and a rate
+    # limit in front of every scan, to answer a question the image's own age
+    # answers well enough.
+    local image="ghcr.io/auditware/radar-api:main"
+    local revision created
+
+    revision=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" 2>/dev/null)
+    created=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.created"}}' "$image" 2>/dev/null)
+
+    # A locally built image (dev mode, or a source build) carries no labels.
+    # Say nothing rather than guess.
+    if [ -z "$revision" ] || [ -z "$created" ]; then
+        return 0
+    fi
+
+    local built_epoch now_epoch age_days
+    if date -j >/dev/null 2>&1; then
+        built_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${created%%.*}" "+%s" 2>/dev/null)   # BSD/macOS
+    else
+        built_epoch=$(date -d "$created" "+%s" 2>/dev/null)                                # GNU
+    fi
+    [ -z "$built_epoch" ] && return 0
+
+    now_epoch=$(date "+%s")
+    age_days=$(( (now_epoch - built_epoch) / 86400 ))
+    [ "$age_days" -lt 0 ] && age_days=0
+
+    echo "[i] radar ${revision:0:7}, image built $(echo "$created" | cut -c1-10) (${age_days}d ago)"
+    if [ "$age_days" -ge "$STALE_IMAGE_DAYS" ]; then
+        echo "[w] This image is ${age_days} days old; \`radar --update\` pulls the latest"
+    fi
+}
+
 check_image_update() {
     local image="$1"
     local registry="$2"
@@ -374,7 +451,7 @@ if [ "$check_update" = true ] && [ "$development_mode" = false ]; then
     
     if [ "$updated" = true ]; then
         echo "[i] Restarting services with updated images..."
-        docker compose -f "$compose_file" up -d --quiet-pull > /dev/null 2>&1
+        compose_up
     fi
     
     cd "$INITIAL_DIR"
@@ -452,8 +529,7 @@ if [ "$development_mode" = true ]; then
         docker compose -f "$compose_file" up -d --build --quiet-pull
         echo "$current_dev_checksum" > "$dev_checksum_file"
     else
-        docker compose -f "$compose_file" up -d --no-build --quiet-pull > /dev/null 2>&1
-        if [ $? -ne 0 ]; then
+        if ! compose_up --no-build; then
             echo "[d] Failed to start containers, rebuilding..."
             docker compose -f "$compose_file" up -d --build --quiet-pull
             echo "$current_dev_checksum" > "$dev_checksum_file"
@@ -475,17 +551,19 @@ elif [ -f "$checksum_file" ]; then
     stored_checksum=$(cat "$checksum_file")
     if [ "$current_checksum" != "$stored_checksum" ]; then
         echo "[i] Configuration changed, building images.. (if frozen - make sure Docker is available)"
-        docker compose -f "$compose_file" up -d --build --quiet-pull > /dev/null 2>&1
+        compose_up --build
         echo "$current_checksum" > "$checksum_file"
     else
         echo "[i] Running images.. (if frozen - make sure Docker is available)" 
-        docker compose -f "$compose_file" up -d --no-build --quiet-pull > /dev/null 2>&1
+        compose_up --no-build
     fi
 else
     echo "[i] First run, building images.. (if frozen - make sure Docker is available)"
-    docker compose -f "$compose_file" up -d --build --quiet-pull > /dev/null 2>&1
+    compose_up --build
     echo "$current_checksum" > "$checksum_file"
 fi
+
+print_version
 
 container_path="/contract"
 if [ -n "$source_directory_or_file" ]; then
@@ -521,13 +599,14 @@ fi
 if [ -n "$fail_on" ]; then
     docker_command+=" --fail-on \"${fail_on}\""
 fi
+if [ "$include_tests" = true ]; then
+    docker_command+=" --include-tests"
+fi
+
 if [ "$write_baseline" = true ]; then
     docker_command+=" --write-baseline"
 elif [ -n "$baseline_file" ] && [ -f "$baseline_file" ]; then
     docker_command+=" --baseline /baseline"
-fi
-if [ "$include_tests" = true ]; then
-    docker_command+=" --include-tests"
 fi
 if [ "$development_mode" = true ]; then
     docker_command+=" --debug"
@@ -555,34 +634,21 @@ fi
 
 cd "$INITIAL_DIR"
 
-# Determine output file paths based on whether output_directory is a file or
-# directory. The report name inside the container follows the extension asked
-# for; a directory gets the JSON report under its default name.
-case "$output_directory" in
-    *.sarif)
-        output_file="$output_directory"
-        report="output.sarif"
-        ;;
-    *.md)
-        output_file="$output_directory"
-        report="output.md"
-        ;;
-    *.json)
-        output_file="$output_directory"
-        report="output.json"
-        ;;
-    *)
-        mkdir -p "$output_directory"
-        output_file="${output_directory%/}/output.json"
-        report="output.json"
-        ;;
-esac
-
-# Only claim the file was written when the copy succeeded. A clean scan writes
-# no report at all, so announcing one unconditionally points the user - or a CI
-# step - at a path that does not exist.
-if docker cp "radar-api:/radar_data/$report" "$output_file" >/dev/null 2>&1; then
-    echo "[i] Results written to $output_file"
+# Determine output file paths based on whether output_directory is a file or directory
+if [[ "$output_directory" == *".sarif" ]]; then
+    output_file="$output_directory"
+    copy_out "/radar_data/output.sarif" "$output_file"
+elif [[ "$output_directory" == *".md" ]]; then
+    output_file="$output_directory"
+    copy_out "/radar_data/output.md" "$output_file"
+elif [[ "$output_directory" == *".json" ]]; then
+    output_file="$output_directory"
+    copy_out "/radar_data/output.json" "$output_file"
+else
+    mkdir -p "$output_directory"
+    output_dir="${output_directory%/}"
+    output_file="$output_dir/output.json"
+    copy_out "/radar_data/output.json" "$output_file"
 fi
 
 if [ "$generate_ast" = true ]; then

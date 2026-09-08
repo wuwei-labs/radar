@@ -1,0 +1,19 @@
+{
+ "anchor-account-reload-owner": "missed",
+ "anchor-interface-account": "missed",
+ "anchor-program-system": "missed",
+ "metaplex-bubblegum-creator": "missed",
+ "metaplex-candy-machine": "missed",
+ "metaplex-token-metadata": "missed",
+ "solend-owner-checks": "missed",
+ "solido-anker-arbitrary-cpi": "missed",
+ "solido-deposit-reserve-account": "missed",
+ "spl-stake-pool-fee-rounding": "unlocated",
+ "spl-stake-pool-mint-decimals": "missed",
+ "spl-token-lending-rounding": "missed",
+ "squads-account-matching": "missed",
+ "squads-recursive-execute": "missed",
+ "squads-signer-auth": "missed",
+ "token-2022-confidential-approve-mint": "missed",
+ "wormhole-sysvar": "detected"
+}
