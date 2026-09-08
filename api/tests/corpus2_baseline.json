@@ -1,6 +1,6 @@
 {
  "anchor-account-reload-owner": "missed",
- "anchor-interface-account": "missed",
+ "anchor-interface-account": "detected",
  "anchor-program-system": "missed",
  "metaplex-bubblegum-creator": "missed",
  "metaplex-candy-machine": "missed",
