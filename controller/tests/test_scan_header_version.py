@@ -16,11 +16,23 @@ import re
 import stat
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 RADAR = Path(__file__).resolve().parent.parent.parent / "radar"
+
+
+def _label_date(days_ago: float) -> str:
+    """A `created` label that stays that many days old as the clock moves.
+
+    The fresh case cannot use a literal. Written as one it passes on the day it
+    is committed and fails once the date drifts past STALE_IMAGE_DAYS - which
+    it did, turning a green suite red a week later with nothing changed.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def _extract(name: str) -> str:
@@ -66,7 +78,7 @@ def _run(tmp_path, revision, created):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="bash wrapper")
 def test_current_build_prints_one_line_and_no_warning(tmp_path):
-    out = _run(tmp_path, "475c06ecf1370213a8f525f18cffe40425fb1e41", "2026-09-06T17:31:07.894Z")
+    out = _run(tmp_path, "475c06ecf1370213a8f525f18cffe40425fb1e41", _label_date(1))
     # The commit is what makes a pasted bug report actionable.
     assert "475c06e" in out
     assert "[w]" not in out
