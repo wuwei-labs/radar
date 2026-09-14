@@ -8,10 +8,8 @@ from utils.selection import template_applies
 from api.models import GeneratedAST
 from api.tasks import run_scan_task
 from utils.ast import (
-    generate_aggregate_program_ast,
-    generate_ast_for_anchor_project,
+    generate_program_ast_for_folder,
     generate_ast_for_rust_file,
-    generate_ast_for_rust_program,
 )
 from celery.result import AsyncResult
 
@@ -23,12 +21,64 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# How many AST rows to keep per project.
+#
+# This table used to be bounded by tearing the stack down and deleting its
+# volumes before every scan, which is also why two scans could never overlap.
+# Bounding it per project instead means that wipe is no longer load-bearing.
+# The headroom is deliberate: a project with several scans in flight must never
+# have a live row pruned out from under it.
+AST_HISTORY_PER_PROJECT = 10
+
+
+def scoped_query(params, source_type, source_path):
+    """Look up AST rows by who asked for them, not only by where they live.
+
+    `source_path` is a path *inside* the container, so it is `/contract` for
+    every caller and identifies nothing on its own. The project and scan ids
+    narrow it to the run that actually generated the row.
+
+    Both are optional. A CLI predating them sends neither and gets the old
+    path-only behaviour, which is correct for the one-scan-at-a-time use it was
+    written for.
+    """
+    query = {"source_type": source_type, f"{source_type}_path": source_path}
+    for key in ("project_id", "scan_id"):
+        value = params.get(key)
+        if value:
+            query[key] = value
+    return query
+
+
+def prune_ast_history(project_id):
+    """Drop this project's oldest AST rows, keeping the newest few.
+
+    Scoped to one project, so a scan can only ever shrink its own history —
+    the property the global volume wipe did not have.
+    """
+    if not project_id:
+        return
+    keep = list(
+        GeneratedAST.objects.filter(project_id=project_id)
+        .order_by("-created")
+        .values_list("id", flat=True)[:AST_HISTORY_PER_PROJECT]
+    )
+    GeneratedAST.objects.filter(project_id=project_id).exclude(id__in=keep).delete()
+
+
 class GenerateASTView(APIView):
     def post(self, request, *args, **kwargs):
         source_type = request.data.get("source_type")
         source_path = request.data.get(f"{source_type}_path")
+        project_id = request.data.get("project_id")
+        scan_id = request.data.get("scan_id")
         framework = request.data.get("framework", "unknown")
         protocols = request.data.get("protocols", []) or []
+        # Test code is written unsafely on purpose, so it is out of scope by
+        # default; `radar --include-tests` puts it back. Absent field means
+        # exclude, so an older controller talking to a newer API gets the
+        # default rather than silently keeping the noise.
+        include_tests = bool(request.data.get("include_tests", False))
 
         if not source_type or not source_path:
             return Response(
@@ -69,7 +119,13 @@ class GenerateASTView(APIView):
             if source_type == "file":
                 logger.info(f"Generating AST for {source_file_path}")
                 try:
-                    file_ast = generate_ast_for_rust_file(source_file_path)
+                    # A file named explicitly by the user is scanned as asked.
+                    # `is_test_path` is about walking a tree; pointing radar at
+                    # one file and getting nothing back would be the silent
+                    # empty scan this feature must not introduce.
+                    file_ast = generate_ast_for_rust_file(
+                        source_file_path, include_tests=True
+                    )
                     ast_data = {"sources": {}, "metadata": {}}
                     ast_data["sources"][str(source_file_path)] = file_ast
                 except Exception as e:
@@ -122,39 +178,15 @@ class GenerateASTView(APIView):
                             {"error": f"Failed to parse Solidity AST: {str(e)}"},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
-                # User may provide a path to the root of the project, or to a specific prgoram,
-                # differentiated by the respective toml file present
-                elif (source_file_path / "Xargo.toml").exists():
-                    try:
-                        ast_data = generate_ast_for_rust_program(source_file_path)
-                    except Exception as e:
-                        logger.error(e)
-                        return Response(
-                            {
-                                "error": f"Failed to parse AST from provided program source code: {str(e)}"
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-                elif (source_file_path / "Anchor.toml").exists():
-                    try:
-                        ast_data = generate_ast_for_anchor_project(source_file_path)
-                    except Exception as e:
-                        logger.error(e)
-                        return Response(
-                            {
-                                "error": f"Failed to parse AST from provided program source code: {str(e)}"
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
-                # last check for multiple programs within a folder, or quit trying
+                # User may provide a path to the root of the project, to a
+                # specific program, or to a folder holding several - the shared
+                # dispatch in `ast.py` decides which, so the offline harnesses
+                # scan a folder exactly the way this endpoint does.
                 else:
                     try:
-                        ast_data = generate_aggregate_program_ast(source_file_path)
-                        if ast_data is None:
-                            raise ValueError(
-                                "No Cargo.toml files found in any subdirectories."
-                            )
+                        ast_data = generate_program_ast_for_folder(
+                            source_file_path, include_tests
+                        )
                     except Exception as e:
                         logger.error(e)
                         return Response(
@@ -172,11 +204,16 @@ class GenerateASTView(APIView):
             "language": language,
             "framework": framework,
             "protocols": protocols,
+            "project_id": project_id,
+            "scan_id": scan_id,
         }
         serializer = GenerateASTSerializer(data=serializer_data)
 
         if serializer.is_valid():
             serializer.save()
+            # Prune after the row is written, not before: a scan that fails to
+            # produce an AST should not shorten the history of one that did.
+            prune_ast_history(project_id)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -216,11 +253,21 @@ class RunScanView(APIView):
             )
 
         task_ids = []
-        query = {"source_type": source_type, f"{source_type}_path": source_path}
+        scan_id = request.data.get("scan_id")
+        query = scoped_query(request.data, source_type, source_path)
         generated_ast = (
             GeneratedAST.objects.filter(**query).order_by("-created").first()
         )
-        
+
+        if generated_ast is None:
+            # Previously this raised an AttributeError further down and returned
+            # a 500. With scoped lookups a miss is a real, reachable case — the
+            # AST belongs to a different project — so say so.
+            return Response(
+                {"error": "No GeneratedAST found for this scan."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         # Get the detected language and framework from the AST
         detected_language = generated_ast.language if generated_ast else "rust"
         detected_framework = generated_ast.framework if generated_ast else "unknown"
@@ -248,12 +295,20 @@ class RunScanView(APIView):
                 ):
                     continue
 
+                # The template name alone used to be the task id, which made it
+                # global across every scan on the machine: two projects running
+                # the same rule at once collided in the result backend and one
+                # read the other's findings. Namespacing by scan makes the id
+                # unique per run while staying readable in celery's logs.
+                task_id = (
+                    f"{scan_id}:{yaml_data['name']}" if scan_id else yaml_data["name"]
+                )
                 result = run_scan_task.apply_async(
                     kwargs={
                         "yaml_data": yaml_data,
                         "generated_ast_id": generated_ast.id,
                     },
-                    task_id=yaml_data["name"],
+                    task_id=task_id,
                 )
                 task_ids.append(result.id)
 
@@ -275,7 +330,7 @@ class PollResultsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        query = {"source_type": source_type, f"{source_type}_path": source_path}
+        query = scoped_query(request.GET, source_type, source_path)
         generated_ast = (
             GeneratedAST.objects.filter(**query).order_by("-created").first()
         )

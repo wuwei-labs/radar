@@ -64,9 +64,20 @@ def handle_response(response):
         sys.exit(2)
 
 
-def generate_ast_for_file_or_folder(path: Path, path_type: str):
-    # Detect and show language before AST generation
-    language, framework, protocols = detect_language_from_path(path)
+def generate_ast_for_file_or_folder(
+    path: Path,
+    path_type: str,
+    include_tests: bool = False,
+    project_id: str = None,
+    scan_id: str = None,
+    detect_path: Path = None,
+):
+    # `path` is the staged, project-scoped path the API will resolve against its
+    # own volume; it does not exist in this container. Detection reads real
+    # files, so it runs against the mount instead.
+    language, framework, protocols = detect_language_from_path(detect_path or path)
+    if not include_tests:
+        print("[i] Skipping test code (--include-tests to scan it)")
     if language != "unknown":
         print(f"[i] Language detected: {language}")
         if framework != "unknown":
@@ -80,6 +91,15 @@ def generate_ast_for_file_or_folder(path: Path, path_type: str):
             print(f"[i] Framework/Toolchain: {framework_label}")
         if protocols:
             print(f"[i] Protocols detected: {', '.join(protocols)}")
+
+    # Say which one it is. A scan that quietly skipped half a repository is the
+    # thing this option must never be mistaken for.
+    if path_type == "folder":
+        print(
+            "[i] Test code: included"
+            if include_tests
+            else "[i] Test code: excluded (--include-tests to scan it)"
+        )
     
     try:
         response = requests.post(
@@ -89,11 +109,25 @@ def generate_ast_for_file_or_folder(path: Path, path_type: str):
                 f"{path_type}_path": str(path),
                 "framework": framework,
                 "protocols": protocols,
+                "include_tests": include_tests,
+                "project_id": project_id,
+                "scan_id": scan_id,
             },
         )
         result = handle_response(response)
         if result is not None:
             print(f"[i] AST successfully generated for {path_type}")
+            # A file the parser could not read is skipped so one unsupported
+            # construct does not cost the findings from every other file - but
+            # it is said out loud, because a scan that read less than it was
+            # asked to must never look like a scan that found nothing.
+            unparsed = (result.get("ast") or {}).get("metadata", {}).get("unparsed_sources") or []
+            if unparsed:
+                print(f"[w] {len(unparsed)} source file(s) could not be parsed and were not scanned:")
+                for entry in unparsed[:10]:
+                    print(f"[w]   {entry['file']}: {entry['error']}")
+                if len(unparsed) > 10:
+                    print(f"[w]   ... and {len(unparsed) - 10} more")
             return result
         else:
             print(f"[e] Failed to generate AST for {path}")
@@ -104,9 +138,20 @@ def generate_ast_for_file_or_folder(path: Path, path_type: str):
         sys.exit(2)
 
 
-def run_scan(path: Path, path_type: str, templates_path: Path = None):
+def run_scan(
+    path: Path,
+    path_type: str,
+    templates_path: Path = None,
+    project_id: str = None,
+    scan_id: str = None,
+):
     try:
-        req_body = {"source_type": path_type, f"{path_type}_path": str(path)}
+        req_body = {
+            "source_type": path_type,
+            f"{path_type}_path": str(path),
+            "project_id": project_id,
+            "scan_id": scan_id,
+        }
         if templates_path is not None:
             req_body["templates_path"] = str(templates_path)
 
@@ -133,8 +178,16 @@ def poll_results(
     local_path: Path = None,
     max_retries: int = 20,
     delay: int = 3,
+    project_id: str = None,
+    scan_id: str = None,
+    container_root: Path = None,
 ):
-    req_params = {"source_type": path_type, f"{path_type}_path": str(path)}
+    req_params = {
+        "source_type": path_type,
+        f"{path_type}_path": str(path),
+        "project_id": project_id,
+        "scan_id": scan_id,
+    }
     retries = 0
     while retries < max_retries:
         try:
@@ -150,7 +203,7 @@ def poll_results(
                     print(f"[i] Ran {template_count} template{'s' if template_count != 1 else ''}")
 
                 if local_path is not None:
-                    results = localize_results(results, local_path)
+                    results = localize_results(results, local_path, container_root)
                 return results, errors
             elif response.status_code == 202:
                 retries += 1

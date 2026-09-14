@@ -95,16 +95,43 @@ radar sets its exit code so a pipeline can gate on it:
 
 | Code | Meaning |
 |------|---------|
-| `0`  | Clean — no findings at or above the fail-on threshold |
+| `0`  | Clean - no findings at or above the fail-on threshold |
 | `1`  | Findings at or above the fail-on threshold |
 | `2`  | Operational error (parse/scan failure, or a template errored out) |
 
-Control what fails the build with `--fail-on` (default `low` — any finding):
+Control what fails the build with `--fail-on` (default `low` - any finding):
 
 ```bash
 radar -p . --fail-on high     # only high/critical findings fail
 radar -p . --fail-on none     # report only, never fail on findings
 ```
+
+### Test code
+
+Tests are skipped by default. Test code is held to a different standard on
+purpose - it unwraps, hardcodes keys, reuses a PDA across two domains and skips
+the owner check, because doing any of that the production way would obscure what
+is being tested or make the case impossible to set up. Reporting it is a cost on
+every scan rather than a finding.
+
+```bash
+radar -p .                    # production code only (default)
+radar -p . --include-tests    # scan tests too
+```
+
+Skipped by path (`tests/`, `test/`, `testing/`, `__tests__` directories, and
+files named `tests.rs`, `test_*.rs`, `*_test.rs`, `*_tests.rs`, `*.test.rs`) and
+by attribute (items behind `#[cfg(test)]`, `#[test]`, `#[bench]`, and
+`#[tokio::test]`-style paths whose last segment is `test`). The attribute pass is
+what catches the usual Rust convention of a `#[cfg(test)] mod tests` inside the
+module it tests, which no path filter can see.
+
+Directory names are judged relative to the scanned root, so a checkout that
+itself lives under a `tests/` directory still scans normally. Whenever files are
+skipped, the run says how many.
+
+`benches/` and `examples/` are *not* skipped: a benchmark is not asserting
+correctness, and an example is code users are invited to copy.
 
 ### Baseline
 
@@ -117,6 +144,34 @@ radar -p . --baseline .radar-baseline.json                    # gate on new find
 
 The baseline fingerprints each finding by rule and project-relative location.
 Commit the file so every developer and the CI share the same accepted set.
+
+### Test code
+
+Test code is excluded by default. Tests unwrap, hardcode keys, reuse a PDA
+across two domains and skip owner checks, because writing them the production
+way would obscure what is being tested - so reporting them is a fixed cost on
+every scan, and the cost is not only noise: it trains people to skim the report,
+which is how the finding that mattered gets missed.
+
+```bash
+radar -p .                    # test code excluded (default)
+radar -p . --include-tests    # scan it too
+```
+
+Excluded, judged relative to the scanned path:
+
+- `tests/` directories (Cargo's integration tests)
+- files named `test.rs` / `tests.rs`, `test_*.rs`, `*_test.rs`, `*_tests.rs`
+- `#[cfg(test)]` and `#[test]` items *inside* production files, which no path
+  filter can see
+
+Still scanned: `benches/` and `examples/`. A benchmark is not asserting
+correctness so it has no reason to be written unsafely, and an example is code
+users are invited to copy - a vulnerability in one is worth more, not less.
+
+Paths are judged relative to the path you scanned, so a checkout that happens to
+live under `~/work/tests/my-program` is not classified as test code in its
+entirety. Naming a single file explicitly (`-s src/tests.rs`) always scans it.
 
 ### Inline suppression
 
@@ -133,3 +188,30 @@ A bare marker suppresses any rule on the target line; listing rule ids (space or
 comma separated) suppresses only those. Rule ids match the finding name loosely,
 so `Missing_Signer_Check`, `missing-signer-check`, and `Missing Signer Check` all
 work.
+
+## 6. 🧹 Concurrent scans and cached data
+
+Scans of different projects run at the same time. Each project gets its own
+staging directory, its own AST rows and its own report path, keyed by a hash of
+the path you pass to `-p`. Two runs of the *same* project are separated further
+by a per-run id, so a pre-commit hook firing while a full scan is going, or two
+worktrees of one repo, is fine.
+
+Nothing is wiped between scans. Earlier versions ran `docker compose down -v`
+before every run — that is what limited radar to one scan at a time, and on a
+slow teardown it fell back to a machine-wide `docker system prune --volumes`
+that reached other projects' Docker volumes too.
+
+Clearing cached data is now something you ask for:
+
+```bash
+radar -p . --clean        # this project's AST rows and staged files
+radar --clean all         # every project on this machine
+```
+
+`--clean` acts and exits; it does not scan. Bare `--clean` is scoped to the
+project named by `-p`, so it can only ever discard your own cached work.
+
+Radar keeps the ten most recent AST rows per project and removes each run's
+report directory once the report has been copied out, so the volume stays
+bounded without a wipe.

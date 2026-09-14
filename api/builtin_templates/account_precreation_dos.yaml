@@ -5,7 +5,7 @@ name: Account Precreation DoS
 description: Detects unsafe account owner assignments without prior validation.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/account_precreation_dos/bad/src/lib.rs#L13
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/account_precreation_dos/bad/programs/account_precreation_dos/src/lib.rs#L13
 rule: |
   for source, nodes in ast:
       for function in nodes.find_all_functions():

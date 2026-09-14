@@ -8,3 +8,5 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 anchor-lang = "0.29.0"
+spl-token = "4.0.0"
+spl-token-2022 = "0.9.0"

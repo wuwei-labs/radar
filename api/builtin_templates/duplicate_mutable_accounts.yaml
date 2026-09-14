@@ -1,8 +1,9 @@
-version: 0.1.3
+version: 0.4.1
 author: forefy
 accent: anchor
 name: Duplicate Mutable Accounts
-description: When there are two or more accounts with mutable data, a check must be in place to ensure mutation of each account is differentiated properly, to avoid unintended data modification of other accounts.
+description: When there are two or more accounts with mutable data, a check must be in place to ensure mutation
+  of each account is differentiated properly, to avoid unintended data modification of other accounts.
 severity: Medium
 certainty: Low
 vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/duplicate_mutable_accounts/bad/src/lib.rs#L18-L21
@@ -11,7 +12,20 @@ rule: |
       try:
           groups = nodes.find_chained_calls("derive", "Accounts").exit_on_none()
           constraints = nodes.find_macro_attribute_by_names("constraint")
-          pins = nodes.find_macro_attribute_by_names("seeds", "address", "associated_token")
+          # `init` belongs here and is the strongest pin of the four: an account
+          # this instruction *creates* cannot be an account it was also handed,
+          # and two `init` fields cannot be the same account because creating one
+          # address twice fails. Without it, every Anchor program that initialises
+          # two accounts of the same type reports a duplicate that the runtime
+          # makes impossible - which was 168 of this rule's 210 findings on real
+          # code, all from one program that initialises many.
+          #
+          # `init_if_needed` is deliberately not a pin. It does not guarantee
+          # creation - the account may already exist - so two such fields can be
+          # the same account, which is exactly the bug this rule is for.
+          pins = nodes.find_macro_attribute_by_names(
+              "seeds", "address", "associated_token", "init"
+          )
 
           seen_structs = []
           for group in groups:
@@ -45,33 +59,30 @@ rule: |
                       account_path = account.access_path
                       if not account_path.startswith(struct_path + ".fields.named["):
                           continue
-                      # The field is resolved by access path rather than by a
-                      # `.parent` hop: `Box<Account<'info, T>>` and
-                      # `Option<Box<...>>` nest deeper than a bare
-                      # `Account<'info, T>`, so the hop landed inside the type
-                      # and `field_name` was not the field's name - which
-                      # silently disabled the `.key()` guard below.
+                      # Resolved by access path rather than by a `.parent` hop:
+                      # `Box<Account<'info, T>>` and `Option<Box<...>>` nest
+                      # deeper than a bare `Account<'info, T>`, so the hop landed
+                      # inside the type and `field_name` was not the field's name -
+                      # which silently disabled the `.key()` guard below.
                       field_node = account.owning_field()
                       if field_node is None:
                           continue
                       field_name = field_node.ident
                       field_path = account_path.split(".ty")[0]
 
-                      # The inner type T lives under the generic arguments; the
-                      # lifetime arg carries no `.type`, so this picks out T.
-                      # Scoped to this `Account` node rather than to the field's
-                      # whole `.ty` subtree: the subtree yields the outermost
-                      # type argument first, so `Box<Account<'info, T>>` gave
-                      # `Account` - the Box's argument - for every boxed field.
-                      # They then all shared one pseudo-type, any two unrelated
-                      # boxed accounts in a struct looked like duplicates, and
-                      # the TokenAccount/Mint exemption below never matched.
-                      # Standing on the `Account` node makes the first match T
-                      # at any wrapper depth.
-                      # Matched strictly below this node, never on it: a boxed
+                      # The inner type T lives under the generic arguments.
+                      # Searched from the `Account` node rather than from the
+                      # field's `.ty`: under `Box<Account<'info, T>>` the first
+                      # match from `.ty` is `Account` itself - the Box's type
+                      # argument - for every boxed field. They then all shared one
+                      # pseudo-type, any two unrelated boxed accounts in a struct
+                      # looked like duplicates, and the TokenAccount/Mint
+                      # exemption below never matched.
+                      #
+                      # Matched strictly below the node, never on it: a boxed
                       # `Account` is itself the Box's type argument, so its own
-                      # path already carries `arguments...type.path.segments`
-                      # and it would answer as its own inner type.
+                      # path already carries `arguments...type.path.segments` and
+                      # it would answer as its own inner type.
                       inner_type = None
                       prefix = account.access_path + "."
                       for candidate in account.find_by_access_path(".arguments.angle_bracketed.args["):
@@ -111,7 +122,32 @@ rule: |
                       # A key comparison on the field (a `require`/`if` guard, or
                       # an inline `constraint = a.key() != b.key()`) distinguishes
                       # the accounts.
-                      if nodes.find_method_calls(field_name, "key"):
+                      # Scoped to this struct and the handlers that take it. A
+                      # `.key()` comparison searched across the whole file let one
+                      # instruction's guard excuse an identically-shaped struct
+                      # beside it, which is the file-scope suppression from #23
+                      # one level down.
+                      struct_name = None
+                      for candidate in nodes.find_by_access_path(struct_path):
+                          if candidate.access_path == struct_path:
+                              struct_name = candidate.ident
+                              break
+
+                      scopes = [struct_path]
+                      if struct_name is not None:
+                          for handler in nodes.find_all_functions():
+                              if struct_name in handler.subtree_idents():
+                                  scopes.append(handler.access_path)
+
+                      distinguished = False
+                      for comparison in nodes.find_method_calls(field_name, "key"):
+                          for scope in scopes:
+                              if comparison.access_path.startswith(scope + "."):
+                                  distinguished = True
+                                  break
+                          if distinguished:
+                              break
+                      if distinguished:
                           continue
 
                       by_type.setdefault(inner_type, []).append(account)

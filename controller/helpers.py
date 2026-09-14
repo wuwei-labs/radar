@@ -99,6 +99,17 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--include-tests",
+        required=False,
+        action="store_true",
+        help=(
+            "Scan test code too. Off by default: tests unwrap, hardcode keys and "
+            "skip checks on purpose, so reporting them is a cost on every scan "
+            "rather than a finding. Covers `tests/` directories, test-named files, "
+            "and items behind #[cfg(test)] / #[test]"
+        ),
+    )
+    parser.add_argument(
         "--debug",
         required=False,
         action="store_true",
@@ -115,6 +126,35 @@ def parse_arguments() -> argparse.Namespace:
         required=False,
         action="store_true",
         help="Snapshot current findings as the baseline instead of reporting/gating",
+    )
+    parser.add_argument(
+        "--project-id",
+        type=str,
+        required=False,
+        help=(
+            "Stable identifier for the calling project, derived from its path on "
+            "the host. Everything a scan writes lives under this, so two projects "
+            "scanning at once cannot read or overwrite each other's work"
+        ),
+    )
+    parser.add_argument(
+        "--scan-id",
+        type=str,
+        required=False,
+        help=(
+            "Identifier for this individual run, separating two concurrent scans "
+            "of the same project"
+        ),
+    )
+    parser.add_argument(
+        "--store-sarif",
+        required=False,
+        action="store_true",
+        help=(
+            "Accumulate SARIF results across runs. Reports are written to a "
+            "location that persists between this project's scans instead of one "
+            "belonging to a single run"
+        ),
     )
     return parser.parse_args()
 
@@ -153,6 +193,10 @@ def copy_to_docker_mount(
         else:
             api_dst_path.unlink()
 
+    # A scoped source nests under the mount (/radar_data/contract/src/lib.rs), so the
+    # intermediate directories will not exist on the first copy.
+    api_dst_path.parent.mkdir(parents=True, exist_ok=True)
+
     try:
         if path_type == "file":
             if radar_src_path.is_symlink():
@@ -178,14 +222,30 @@ def copy_to_docker_mount(
         raise Exception(f"[e] Failed to copy {path_type} to volume: {str(e)}")
 
 
-def localize_results(results, local_path):
+def localize_results(results, local_path, container_root: Optional[Path] = None):
+    """Rewrite in-container paths back to the paths the caller knows.
+
+    `container_root` is where this scan's copy of the source was staged. It used
+    to be a constant — `/radar_data/contract` for everyone — and was stripped by
+    dropping a hardcoded three leading components. Now that each project stages
+    under its own directory the depth varies, so the root is passed in and
+    removed by name. The old fixed-depth strip stays as the fallback for a
+    location that does not sit under the root, which would otherwise raise.
+    """
     for index, result in enumerate(results):
         result_locations = result.get("locations")
         localized_results = []
         for location in result_locations:
             container_path, location_src = location.split(":", 1)
-            container_path_parts = Path(container_path).parts
-            localized_path = Path(local_path, *container_path_parts[3:])
+            relative = None
+            if container_root is not None:
+                try:
+                    relative = Path(container_path).relative_to(container_root)
+                except ValueError:
+                    relative = None
+            if relative is None:
+                relative = Path(*Path(container_path).parts[3:])
+            localized_path = Path(local_path, relative)
             localized_location = f"{localized_path}:{location_src}"
             localized_results.append(localized_location)
         results[index]["locations"] = localized_results
@@ -206,7 +266,7 @@ def _relativize(file_path: str, root: Optional[Path]) -> str:
 def finding_fingerprints(finding: dict, root: Optional[Path]):
     """Stable identity for each location of a finding: (rule, rel-file, line:cols).
 
-    Location-based, so it survives across runs but not across large line moves —
+    Location-based, so it survives across runs but not across large line moves -
     a deliberate simplicity trade-off for a first baseline; inline suppression
     covers the churny cases.
     """
@@ -275,10 +335,17 @@ def print_write_outputs(
     errors: list | None = None,
     baseline_path: str | None = None,
     write_baseline: bool = False,
+    output_root: Path = Path("/radar_data"),
 ):
-    container_output_file_path = Path(f"/radar_data/output.{output_type}")
-    container_output_path_ast = Path("/radar_data/ast.json")
-    container_baseline_path = Path("/radar_data/baseline.json")
+    # Reports go under the directory this run owns. They used to be written to
+    # fixed names directly in /radar_data, which meant two scans overlapping by
+    # even a second had the second one's report copied out as the first one's —
+    # silently, with no error anywhere to notice.
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    container_output_file_path = output_root / f"output.{output_type}"
+    container_output_path_ast = output_root / "ast.json"
+    container_baseline_path = output_root / "baseline.json"
     errors = errors or []
 
     if ignore_severities:
@@ -376,11 +443,21 @@ def print_write_outputs(
             print(f"    - {err.get('name', 'unknown')}: {err.get('error', 'unknown error')}")
 
     if len(results) == 0:
+        # A clean scan still owes --output the file it promised. The CLI copies this
+        # path out of the container and reports "Results written to ..." either way,
+        # so writing nothing left the caller with a success message and no artefact.
+        container_output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file = Path(container_output_file_path)
         if output_type == "sarif":
             print("[i] Writing empty SARIF to indicate no results.")
-            output_file = Path(container_output_file_path)
-            with output_file.open("w") as outfile:
+            with open(output_file, "w") as outfile:
                 json.dump(no_results_sarif, outfile, indent=4)
+        elif output_type == "md":
+            with open(output_file, "w") as outfile:
+                outfile.write("# radar\n\nNo results found.\n")
+        else:
+            with open(output_file, "w") as outfile:
+                json.dump([], outfile, indent=4)
 
         if write_ast:
             with open(container_output_path_ast, "w") as f:
@@ -450,7 +527,7 @@ def print_write_outputs(
     # silently broke every exit-code-based gate (the shipped pre-commit hook
     # included). Operational errors take precedence and exit 2.
     if errors:
-        print("[e] radar completed with template errors — exiting 2.")
+        print("[e] radar completed with template errors - exiting 2.")
         sys.exit(2)
 
     gating = [f for f in results if meets_fail_threshold(f["severity"], fail_on)]
@@ -458,7 +535,7 @@ def print_write_outputs(
         gating_count = sum(len(f["locations"]) for f in gating)
         print(
             f"[i] {gating_count} finding(s) at or above severity '{fail_on}' "
-            f"— exiting 1 for CI gating (override with --fail-on)."
+            f"- exiting 1 for CI gating (override with --fail-on)."
         )
         sys.exit(1)
     sys.exit(0)

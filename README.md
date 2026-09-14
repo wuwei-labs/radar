@@ -136,7 +136,7 @@ radar returns an exit code you can gate a build on:
 
 | Code | Meaning |
 |------|---------|
-| `0`  | Clean — no findings at or above the fail-on threshold |
+| `0`  | Clean - no findings at or above the fail-on threshold |
 | `1`  | Findings at or above the fail-on threshold |
 | `2`  | Operational error (parse/scan failure, or a template errored out) |
 
@@ -145,6 +145,16 @@ Tune what fails a build with `--fail-on` (default `low`, i.e. any finding):
 ```bash
 radar -p . --fail-on high     # only high/critical findings fail the build
 radar -p . --fail-on none     # never fail on findings (report only)
+```
+
+**Test code is out of scope by default.** Tests unwrap, hardcode keys and skip
+owner checks on purpose, so reporting them is a fixed cost on every scan - and it
+trains people to skim the report, which is how the real finding gets missed. This
+covers `tests/` directories, test-named files, and `#[cfg(test)]` / `#[test]`
+items inside production files. `benches/` and `examples/` are always scanned.
+
+```bash
+radar -p . --include-tests    # scan test code too
 ```
 
 **Adopting on an existing codebase.** Accept everything present today and gate

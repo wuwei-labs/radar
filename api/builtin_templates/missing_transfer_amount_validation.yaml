@@ -5,7 +5,7 @@ name: Missing Transfer Amount Validation
 description: A program that signs a token transfer with its own PDA moves tokens it custodies. If the amount comes from the caller and is never checked against what that caller is entitled to, one caller can drain the vault. SPL Token only enforces that the balance is sufficient, not that the withdrawer is owed it.
 severity: Low
 certainty: Low
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_transfer_amount_validation/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_transfer_amount_validation/bad/programs/missing_transfer_amount_validation/src/lib.rs
 rule: |
   require_macros = ("require", "require_eq", "require_gte", "require_gt", "require_neq")
   for source, nodes in ast:

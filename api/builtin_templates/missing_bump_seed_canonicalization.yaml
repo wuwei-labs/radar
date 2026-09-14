@@ -5,7 +5,7 @@ name: Missing Bump Seed Canonicalization
 description: create_program_address accepts any bump that lands on a valid address, so a caller-supplied bump can derive a second, non-canonical PDA for the same seeds. find_program_address returns the canonical bump and is what a derivation should be checked against.
 severity: Medium
 certainty: Medium
-vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_bump_seed_canonicalization/bad/src/lib.rs
+vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/missing_bump_seed_canonicalization/bad/programs/missing_bump_seed_canonicalization/src/lib.rs
 rule: |
   for source, nodes in ast:
       try:

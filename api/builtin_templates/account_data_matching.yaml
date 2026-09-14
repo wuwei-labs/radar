@@ -1,11 +1,21 @@
-version: 0.1.1
+version: 0.3.0
 author: forefy
-accent: solana
+accent: anchor
 name: Account Data Matching
-description: Unpacking account structures without verifying authorization might allow an attacker to view or modify account data unintentionally. Therefore, account unpack operations should be accompanied by appropriate ownership verification.
+description: Unpacking account structures without verifying authorization might allow an attacker to view or modify
+  account data unintentionally. Therefore, account unpack operations should be accompanied by appropriate ownership
+  verification.
 severity: Low
 certainty: Low
 vulnerable_example: https://github.com/Auditware/radar/blob/main/api/tests/mocks/account_data_matching/bad/src/lib.rs#L13
+# Known open question: this reports five unpacks in spl-token's `process_approve`
+# and `process_revoke` where no owner check names the account in that function.
+# SPL Token is among the most audited programs in the ecosystem, which makes five
+# real findings there far less likely than a gap here - the likely gap being that
+# this has no model of *which* program should own an account. Demanding
+# `owner == program_id` is wrong for an account meant to be owned by the token
+# program. Recorded rather than suppressed: certainty is Low and five findings is
+# tolerable, and this is the first thing to re-measure when that model exists.
 rule: |
   for source, nodes in ast:
       for function in nodes.find_all_functions():
@@ -13,19 +23,18 @@ rule: |
           if not unpack_calls:
               continue
 
-          # Validated when the unpacked account's stored key (`owner`) is
-          # compared against the expected signer. A plain `if authority.key !=
-          # token.owner` guard counts as much as a `require!` - the previous
-          # rule only recognised `require!`, so it false-positived on the
-          # if-guarded form.
-          owner_comparison = function.find_comparison_involving("owner").nodes
-          require_with_owner = (
-              function.find_by_names("require", "require_keys_eq", "require_eq").nodes
-              and function.find_member_accesses("owner").nodes
-          )
-
-          if owner_comparison or require_with_owner:
+          # A function handed a byte slice has no account to check the owner of.
+          # `fn unpack_mint(data: &[u8]) -> Result<Mint>` is a decoder: whoever
+          # owns the account proved it before reading the bytes out, and there is
+          # nothing here that could prove anything.
+          if not function.find_by_names("AccountInfo", "account_info", "accounts").nodes:
               continue
 
-          for unpack_call in unpack_calls:
-              print(unpack_call.to_result())
+          for group in unpack_calls:
+              for unpack_call in group:
+                  # Per account, not per function. A function that proved one
+                  # account has not proved the one unpacked beside it, and that
+                  # sibling is the shape these bugs survive review in - the file
+                  # plainly contains an owner check.
+                  if function.unguarded_accounts_at(unpack_call):
+                      print(unpack_call.to_result())

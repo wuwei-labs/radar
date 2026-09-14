@@ -18,7 +18,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tests.test_templates import run_template_on_rust_source  # noqa: E402
+from tests.test_templates import run_template_on_rust_sources  # noqa: E402
 
 # Prefer the repo-relative templates dir so this runs from a dev checkout; fall
 # back to the container path (`/api/builtin_templates`) when run inside the
@@ -32,8 +32,14 @@ def sources(directory: Path):
     return sorted(p for p in directory.rglob("*.rs"))
 
 
-def anchor_stems_with_rust_fixtures():
-    """Every Anchor template stem that has bad/ and good/ Rust mock sources.
+def rust_stems_with_fixtures():
+    """Every Rust template stem that has bad/ and good/ Rust mock sources.
+
+    This used to select on `accent == "anchor"`, from when accent was a proxy
+    for "is this a Solana rule". The accent silo made it a floor instead - a
+    rule accented `rust` or `solana` runs on Anchor sources too - so that filter
+    now excludes most of the rules it was meant to cover. Select on the language
+    the harness can actually drive, and let the mock's presence decide the rest.
 
     Shared with the pytest gate so the script and CI check the same set.
     """
@@ -44,7 +50,7 @@ def anchor_stems_with_rust_fixtures():
             data = yaml.safe_load(template_path.read_text())
         except Exception:
             continue
-        if not isinstance(data, dict) or data.get("accent") != "anchor":
+        if not isinstance(data, dict) or data.get("language", "rust") != "rust":
             continue
         mock = MOCKS / stem
         if not (mock / "bad").is_dir() or not (mock / "good").is_dir():
@@ -65,7 +71,7 @@ def scan_variants(stem: str):
     if not template_path.exists():
         return None
     data = yaml.safe_load(template_path.read_text())
-    if data.get("accent") != "anchor":
+    if data.get("language", "rust") != "rust":
         return None
     mock = MOCKS / stem
     if not (mock / "bad").is_dir() or not (mock / "good").is_dir():
@@ -75,15 +81,15 @@ def scan_variants(stem: str):
 
     counts = {}
     for variant in ("bad", "good"):
-        hits = []
-        for source in sources(mock / variant):
-            try:
-                result = run_template_on_rust_source(data, source)
-            except Exception as exc:  # a rule that throws is a rule that is broken
-                hits.append(f"ERROR {source.name}: {exc}")
-                continue
-            hits.extend(result.get("locations", []))
-        counts[variant] = hits
+        variant_sources = sources(mock / variant)
+        try:
+            # One AST for the whole variant, matching a real scan. Parsing each
+            # file separately would hide any rule whose two passes span files.
+            result = run_template_on_rust_sources(data, variant_sources)
+        except Exception as exc:  # a rule that throws is a rule that is broken
+            counts[variant] = [f"ERROR {mock.name}/{variant}: {exc}"]
+            continue
+        counts[variant] = list(result.get("locations", []))
     return counts
 
 
