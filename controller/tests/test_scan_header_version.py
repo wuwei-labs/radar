@@ -97,6 +97,22 @@ def test_an_unlabelled_image_says_nothing(tmp_path):
     assert _run(tmp_path, "", "").strip() == ""
 
 
+def test_the_header_reads_the_image_the_scan_runs():
+    """Header and compose must name one image, or the build line describes another.
+
+    Upstream's copy names `auditware`, which this fork neither pulls nor runs;
+    on a machine that has both cached it reported the wrong build silently. Tied
+    to compose rather than to a literal so the next upstream merge that brings
+    the name back fails here instead of in a scan header nobody reads.
+    """
+    source = RADAR.read_text()
+    compose = (RADAR.parent / "docker-compose.yml").read_text()
+    header_image = re.search(
+        r'print_version\(\) \{.*?local image="([^"]+)"', source, re.S
+    ).group(1)
+    assert header_image in compose
+
+
 def test_an_unparseable_date_says_nothing(tmp_path):
     """Never let a cosmetic header break a scan."""
     assert _run(tmp_path, "abc1234", "not-a-date").strip() == ""

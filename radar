@@ -390,7 +390,10 @@ print_version() {
     # digest would put a network round trip, an offline failure mode and a rate
     # limit in front of every scan, to answer a question the image's own age
     # answers well enough.
-    local image="ghcr.io/auditware/radar-api:main"
+    # Same image the compose file runs and `update` pulls. Upstream's name is
+    # wrong here: it is the one the fork does not run, and a machine that has
+    # both cached reads a build it is not scanning with.
+    local image="ghcr.io/wuwei-labs/radar-api:main"
     local revision created
 
     revision=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" 2>/dev/null)
