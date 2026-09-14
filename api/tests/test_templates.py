@@ -4,7 +4,7 @@ import pytest
 import yaml
 from utils.ast import generate_ast_for_rust_file
 from utils.dsl.dsl import inject_code_lines, process_template_outputs, wrapped_exec
-from utils.selection import ACCENTS_FOR_FRAMEWORK
+from utils.selection import ACCENTS_FOR_FRAMEWORK, accents_for
 
 
 def normalize_template_name(name):
@@ -861,7 +861,12 @@ def test_every_accented_template_is_selectable_on_its_own_mock():
         if not mock.is_dir() or not list(mock.rglob("*.rs")):
             continue
         framework = detect_language_from_path(mock)[1]
-        if framework != "unknown" and framework != accent:
+        # Asked the way the selector asks it. An exact match is upstream's
+        # question, where an accent either is the framework or is dropped; here
+        # an accent is a floor, so an Anchor scan legitimately runs `solana` and
+        # `rust` rules. Comparing for equality reported all 21 of them as
+        # unselectable while a real scan selects every one.
+        if framework != "unknown" and accent not in accents_for(framework):
             mismatched.append(f"{template_path.stem}: accent={accent}, mock detects {framework}")
 
     assert not mismatched, (
